@@ -18,9 +18,9 @@
 ## Wave 2 (01:55 CST) — Engineering
 | Agent | Label | Model | Status | Output |
 |-------|-------|-------|--------|--------|
-| Data Engineer | PQV-DataEngineer | TBD | ⏳ Scheduled | `src/data/` |
-| Viz Engineer | PQV-VizEngineer | TBD | ⏳ Scheduled | `src/viz/` |
-| UI Engineer | PQV-UIEngineer | TBD | ⏳ Scheduled | `src/ui/` |
+| Data Engineer | PQV-DataEngineer | Opus 4.5 | 🟢 Running | `src/data/` |
+| Viz Engineer | PQV-VizEngineer | Opus 4.5 | 🟢 Running | `src/viz/` |
+| UI Engineer | PQV-UIEngineer | Opus 4.5 | 🟢 Running | `src/ui/` |
 
 ---
 
