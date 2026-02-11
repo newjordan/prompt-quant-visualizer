@@ -108,25 +108,23 @@
       }
     });
     
-    // Mount widget
-    widget.mount(container);
-    
-    // Hide initial loader when ready
+    // Register event handlers BEFORE mount (mount emits 'ready' synchronously)
     widget.on('ready', () => {
       setTimeout(() => {
         loader.classList.add('hidden');
       }, 300);
     });
     
-    // Handle errors
     widget.on('error', ({ error, context }) => {
       console.error(`Widget error (${context}):`, error);
     });
     
-    // Handle session loaded
     widget.on('session:loaded', ({ nodes, meta }) => {
       console.log(`Loaded session with ${nodes.length} prompts`);
     });
+    
+    // Mount widget (this will emit 'ready')
+    widget.mount(container);
     
     // File input handler
     fileInput.addEventListener('change', async (e) => {
