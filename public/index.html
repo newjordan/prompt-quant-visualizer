@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Prompt Quant Visualizer - A 3D starmap visualization of conversation sessions">
+  <meta name="theme-color" content="#040911">
+  
+  <title>Prompt Quant Visualizer</title>
+  
+  <!-- Frost Glass Styles -->
+  <link rel="stylesheet" href="style.css">
+  
+  <!-- JetBrains Mono for the monospace aesthetic -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  
+  <style>
+    /* Inline critical styles for faster paint */
+    body {
+      margin: 0;
+      padding: 0;
+      background: #040911;
+      font-family: "JetBrains Mono", monospace;
+    }
+    
+    /* Initial loading state */
+    .pqv-initial-loader {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 24px;
+      background: linear-gradient(170deg, #040911 0%, #071326 48%, #07111d 100%);
+      color: rgba(224, 242, 255, 0.95);
+      z-index: 1000;
+      transition: opacity 0.5s ease;
+    }
+    
+    .pqv-initial-loader.hidden {
+      opacity: 0;
+      pointer-events: none;
+    }
+    
+    .pqv-initial-loader__title {
+      font-size: 14px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: #00FFCC;
+    }
+    
+    .pqv-initial-loader__spinner {
+      width: 48px;
+      height: 48px;
+      border: 2px solid rgba(0, 255, 204, 0.2);
+      border-top-color: #00FFCC;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+    
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+  </style>
+</head>
+<body class="pqv-standalone">
+  <!-- Initial loader (shown until widget mounts) -->
+  <div class="pqv-initial-loader" id="initialLoader">
+    <div class="pqv-initial-loader__spinner"></div>
+    <div class="pqv-initial-loader__title">Prompt.Quant.Starmap</div>
+  </div>
+  
+  <!-- Main widget container -->
+  <div id="app"></div>
+  
+  <!-- File input for loading sessions -->
+  <div class="pqv-file-input" id="fileInput">
+    <label class="pqv-file-input__btn">
+      Load Session
+      <input type="file" accept=".jsonl,.json" id="sessionFile">
+    </label>
+  </div>
+  
+  <script type="module">
+    import { PromptQuantWidget } from '../src/ui/index.js';
+    
+    // Initialize widget
+    const container = document.getElementById('app');
+    const loader = document.getElementById('initialLoader');
+    const fileInput = document.getElementById('sessionFile');
+    
+    const widget = new PromptQuantWidget({
+      showHeader: true,
+      title: 'PROMPT.QUANT.STARMAP',
+      navigation: {
+        position: 'bottom-center',
+        showCounter: true,
+        showTimeline: true
+      },
+      details: {
+        position: 'right',
+        width: 360,
+        showMetrics: true,
+        showFullText: true
+      }
+    });
+    
+    // Mount widget
+    widget.mount(container);
+    
+    // Hide initial loader when ready
+    widget.on('ready', () => {
+      setTimeout(() => {
+        loader.classList.add('hidden');
+      }, 300);
+    });
+    
+    // Handle errors
+    widget.on('error', ({ error, context }) => {
+      console.error(`Widget error (${context}):`, error);
+    });
+    
+    // Handle session loaded
+    widget.on('session:loaded', ({ nodes, meta }) => {
+      console.log(`Loaded session with ${nodes.length} prompts`);
+    });
+    
+    // File input handler
+    fileInput.addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      
+      try {
+        const text = await file.text();
+        const lines = text.trim().split('\n').filter(Boolean);
+        const nodes = [];
+        let index = 0;
+        
+        for (const line of lines) {
+          try {
+            const entry = JSON.parse(line);
+            if (entry.role === 'user') {
+              const content = entry.content || '';
+              nodes.push({
+                id: `node-${index}`,
+                index: index,
+                text: content,
+                textPreview: content.substring(0, 120) + (content.length > 120 ? '…' : ''),
+                timestamp: entry.timestamp ? new Date(entry.timestamp).getTime() : Date.now() - (lines.length - index) * 60000,
+                metrics: {
+                  charCount: content.length,
+                  wordCount: content.split(/\s+/).filter(Boolean).length,
+                  tokenEstimate: Math.ceil(content.length / 4),
+                  toolCallCount: 0,
+                  toolTypes: [],
+                  responseLatencyMs: 0,
+                  similarityToPrev: null,
+                  topicDriftScore: null,
+                  complexityScore: Math.min(100, Math.ceil(content.length / 20))
+                },
+                position: { x: 0, y: 0, z: 0 },
+                prevId: index > 0 ? `node-${index - 1}` : null,
+                nextId: null
+              });
+              index++;
+            }
+          } catch (err) {
+            console.warn('Failed to parse line:', err);
+          }
+        }
+        
+        // Set next IDs
+        for (let i = 0; i < nodes.length - 1; i++) {
+          nodes[i].nextId = nodes[i + 1].id;
+        }
+        
+        widget.loadNodes(nodes);
+        
+      } catch (err) {
+        console.error('Failed to load file:', err);
+        alert('Failed to load session file. Please ensure it is a valid JSONL file.');
+      }
+      
+      // Reset file input
+      e.target.value = '';
+    });
+    
+    // Load demo data if no file provided
+    async function loadDemoData() {
+      // Check for URL parameter
+      const urlParams = new URLSearchParams(window.location.search);
+      const sessionPath = urlParams.get('session');
+      
+      if (sessionPath) {
+        try {
+          await widget.loadSession(sessionPath);
+          return;
+        } catch (err) {
+          console.warn('Failed to load session from URL:', err);
+        }
+      }
+      
+      // Generate demo nodes
+      const demoPrompts = [
+        "What's the weather like today?",
+        "Can you help me write a Python function to sort a list?",
+        "Explain quantum computing in simple terms",
+        "Create a haiku about programming",
+        "What are the best practices for REST API design?",
+        "How do neural networks learn?",
+        "Write a bash script to backup my files",
+        "Summarize the key points of machine learning",
+        "Help me debug this JavaScript code",
+        "What's the difference between TCP and UDP?",
+        "Generate a creative story about a robot",
+        "Explain the concept of recursion with examples"
+      ];
+      
+      const demoNodes = demoPrompts.map((text, i) => ({
+        id: `demo-${i}`,
+        index: i,
+        text: text,
+        textPreview: text,
+        timestamp: Date.now() - (demoPrompts.length - i) * 120000,
+        metrics: {
+          charCount: text.length,
+          wordCount: text.split(/\s+/).length,
+          tokenEstimate: Math.ceil(text.length / 4),
+          toolCallCount: Math.floor(Math.random() * 4),
+          toolTypes: ['web_search', 'read', 'exec'].slice(0, Math.floor(Math.random() * 3)),
+          responseLatencyMs: 500 + Math.random() * 5000,
+          similarityToPrev: i > 0 ? Math.random() * 0.5 : null,
+          topicDriftScore: i > 0 ? Math.random() * 0.8 : null,
+          complexityScore: 20 + Math.floor(Math.random() * 60)
+        },
+        position: { x: 0, y: 0, z: 0 },
+        prevId: i > 0 ? `demo-${i - 1}` : null,
+        nextId: i < demoPrompts.length - 1 ? `demo-${i + 1}` : null
+      }));
+      
+      widget.loadNodes(demoNodes);
+    }
+    
+    // Load demo data after a short delay
+    setTimeout(loadDemoData, 500);
+    
+    // Expose widget globally for debugging
+    window.pqvWidget = widget;
+    
+    // Keyboard shortcut to show/hide file input
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'o' && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        fileInput.querySelector('input').click();
+      }
+    });
+  </script>
+</body>
+</html>
