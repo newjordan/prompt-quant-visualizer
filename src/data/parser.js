@@ -3,7 +3,6 @@
  * @module data/parser
  */
 
-import { readFile } from 'fs/promises';
 import { calculateMetrics, createTopicSignature, computeTopicOverlap } from './metrics.js';
 
 /**
@@ -222,23 +221,32 @@ function findAssistantResponse(entries, userIndex) {
 
 /**
  * Parse an OpenClaw session JSONL file into PromptNodes
- * @param {string} jsonlPath - Path to .jsonl session file
+ * @param {string} jsonlPath - Path or URL to .jsonl session file
  * @returns {Promise<ParseResult>} Parse result with nodes and metadata
  */
 export async function parseSession(jsonlPath) {
   const errors = [];
   const nodes = [];
   
-  // Read file
+  // Read file (browser-compatible using fetch)
   let content;
   try {
-    content = await readFile(jsonlPath, 'utf-8');
+    const response = await fetch(jsonlPath);
+    if (!response.ok) {
+      return {
+        success: false,
+        nodes: [],
+        meta: createEmptyMeta(jsonlPath),
+        errors: [{ line: 0, message: `HTTP ${response.status}: ${response.statusText}` }]
+      };
+    }
+    content = await response.text();
   } catch (err) {
     return {
       success: false,
       nodes: [],
       meta: createEmptyMeta(jsonlPath),
-      errors: [{ line: 0, message: `Failed to read file: ${err.message}` }]
+      errors: [{ line: 0, message: `Failed to fetch file: ${err.message}` }]
     };
   }
   

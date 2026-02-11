@@ -178,7 +178,7 @@ export class PromptQuantWidget {
     try {
       // Try to import the renderer dynamically
       // The viz engineer will create this module
-      const vizModule = await import('../viz/starmap-renderer.js').catch(() => null);
+      const vizModule = await import('../viz/starmap.js').catch(() => null);
       
       if (vizModule && vizModule.StarmapRenderer) {
         this.renderer = new vizModule.StarmapRenderer(this.options.renderer);
@@ -269,7 +269,7 @@ export class PromptQuantWidget {
       this._updateStatus('Loading...');
 
       // Try to import the parser dynamically
-      const dataModule = await import('../data/session-parser.js').catch(() => null);
+      const dataModule = await import('../data/parser.js').catch(() => null);
       
       if (dataModule && dataModule.parseSession) {
         const result = await dataModule.parseSession(jsonlPath);

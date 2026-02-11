@@ -64,8 +64,8 @@ export default {
     const { parseSession } = await import('./parser.js');
     return parseSession(path);
   },
-  parseSessionFromString: (content, sessionId) => {
-    const { parseSessionFromString } = require('./parser.js');
+  parseSessionFromString: async (content, sessionId) => {
+    const { parseSessionFromString } = await import('./parser.js');
     return parseSessionFromString(content, sessionId);
   },
   

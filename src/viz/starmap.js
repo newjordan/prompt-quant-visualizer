@@ -667,7 +667,7 @@ export class StarmapRenderer {
    * Set visibility of different elements.
    * @param {VisibilityOptions} options
    */
-  setVisibility({ connections = true, satellites = true, labels = true, grid = true } = {}) {
+  setVisibility({ connections = true, satellites: showSatellites = true, labels = true, grid = true } = {}) {
     if (this.pathsGroup) {
       this.pathsGroup.visible = connections;
     }
@@ -675,7 +675,7 @@ export class StarmapRenderer {
     // Toggle satellites on each node
     this.nodeObjects.forEach(({ satellites }) => {
       if (satellites) {
-        satellites.visible = satellites;
+        satellites.visible = showSatellites;
       }
     });
     
