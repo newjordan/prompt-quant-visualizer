@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TOKEN.VIZ — Prompt Quant Tokenizer</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600&display=swap" rel="stylesheet">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: 'JetBrains Mono', monospace;
+      background: radial-gradient(ellipse at 30% 20%, rgba(0, 40, 60, 0.4) 0%, transparent 50%),
+                  radial-gradient(ellipse at 70% 80%, rgba(20, 0, 50, 0.3) 0%, transparent 50%),
+                  #060a10;
+      color: #c8d6e5;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 40px 20px;
+    }
+
+    h1 {
+      font-size: 11px;
+      font-weight: 400;
+      text-transform: uppercase;
+      letter-spacing: 4px;
+      color: rgba(125, 244, 255, 0.5);
+      margin-bottom: 8px;
+    }
+
+    .subtitle {
+      font-size: 10px;
+      color: rgba(200, 214, 229, 0.3);
+      letter-spacing: 2px;
+      margin-bottom: 32px;
+    }
+
+    .demo-container {
+      width: 100%;
+      max-width: 720px;
+    }
+
+    token-viz {
+      width: 100%;
+      margin-bottom: 24px;
+    }
+
+    .info-panel {
+      border: 1px solid rgba(125, 244, 255, 0.1);
+      border-radius: 8px;
+      background: rgba(10, 14, 20, 0.6);
+      backdrop-filter: blur(8px);
+      padding: 16px;
+      font-size: 11px;
+      line-height: 1.8;
+    }
+
+    .info-panel .label {
+      color: rgba(125, 244, 255, 0.4);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      font-size: 9px;
+    }
+
+    .info-panel .value {
+      color: rgba(0, 255, 204, 0.8);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .token-breakdown {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 8px;
+    }
+
+    .cat-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 9px;
+      letter-spacing: 0.5px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    .cat-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+    }
+
+    .threeD-status {
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid rgba(125, 244, 255, 0.08);
+      font-size: 9px;
+      color: rgba(200, 214, 229, 0.3);
+    }
+  </style>
+</head>
+<body>
+
+  <h1>token.viz</h1>
+  <p class="subtitle">real-time tokenizer visualization — rust + wasm</p>
+
+  <div class="demo-container">
+    <!-- The web component — just drop it in -->
+    <token-viz
+      vocab="cl100k_base"
+      mode="both"
+      placeholder="Type here to see tokens in real time..."
+    ></token-viz>
+
+    <div class="info-panel">
+      <div>
+        <span class="label">Vocab: </span>
+        <span class="value" id="info-vocab">—</span>
+        &nbsp;&nbsp;
+        <span class="label">Tokens: </span>
+        <span class="value" id="info-count">0</span>
+        &nbsp;&nbsp;
+        <span class="label">Vocab Size: </span>
+        <span class="value" id="info-vocab-size">—</span>
+      </div>
+      <div class="token-breakdown" id="info-breakdown"></div>
+      <div class="threeD-status" id="info-3d">
+        Three.js scene ready — add your visualization via element.getScene()
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    // Import the web component (auto-registers <token-viz>)
+    import '../src/tokenizer/token-viz.js';
+
+    const viz = document.querySelector('token-viz');
+    const infoVocab = document.getElementById('info-vocab');
+    const infoCount = document.getElementById('info-count');
+    const infoVocabSize = document.getElementById('info-vocab-size');
+    const infoBreakdown = document.getElementById('info-breakdown');
+    const info3d = document.getElementById('info-3d');
+
+    // ── React to tokenization events ──
+    viz.addEventListener('tokenize', (e) => {
+      const { tokens, total_tokens, vocab_id } = e.detail;
+
+      infoCount.textContent = total_tokens;
+      infoVocab.textContent = vocab_id;
+
+      // Category breakdown
+      const cats = {};
+      for (const t of tokens) {
+        cats[t.category] = (cats[t.category] || 0) + 1;
+      }
+
+      infoBreakdown.innerHTML = Object.entries(cats)
+        .sort((a, b) => b[1] - a[1])
+        .map(([cat, count]) => {
+          const color = getCatColor(cat);
+          return `<span class="cat-badge">
+            <span class="cat-dot" style="background: rgb(${color.join(',')})"></span>
+            ${cat}: ${count}
+          </span>`;
+        })
+        .join('');
+    });
+
+    viz.addEventListener('ready', async () => {
+      const bridge = viz.getBridge();
+      if (bridge) {
+        const info = bridge.vocabInfo();
+        if (info) {
+          infoVocabSize.textContent = info.vocab_size.toLocaleString();
+        }
+      }
+
+      // ── Three.js hook example ──
+      // This is where YOUR 3D visualization code goes.
+      // The scene, camera, and renderer are ready.
+      try {
+        const scene = viz.getScene();
+        const THREE = await import('three');
+
+        if (scene) {
+          info3d.textContent = 'Three.js scene active — listening for token updates';
+
+          // Example: add a subtle grid as a base
+          const grid = new THREE.GridHelper(200, 40, 0x1a2a3a, 0x0a1520);
+          grid.rotation.x = Math.PI / 2;
+          grid.position.z = -20;
+          scene.add(grid);
+
+          // Subscribe to token updates and update 3D scene
+          let tokenMeshes = [];
+
+          viz.onTokenUpdate((result) => {
+            // Clear previous token meshes
+            for (const m of tokenMeshes) {
+              scene.remove(m);
+              m.geometry?.dispose();
+              m.material?.dispose();
+            }
+            tokenMeshes = [];
+
+            if (!result.tokens.length) return;
+
+            // Lay out tokens in a spiral
+            const count = result.tokens.length;
+            for (let i = 0; i < count; i++) {
+              const token = result.tokens[i];
+              const [r, g, b] = token.color;
+
+              const angle = (i / count) * Math.PI * 4;
+              const radius = 10 + i * 0.8;
+              const x = Math.cos(angle) * radius;
+              const y = Math.sin(angle) * radius;
+              const z = (token.weight - 0.5) * 30;
+
+              // Size based on token text length
+              const size = 0.8 + token.text.length * 0.3;
+
+              const geometry = new THREE.SphereGeometry(size, 8, 6);
+              const material = new THREE.MeshBasicMaterial({
+                color: new THREE.Color(`rgb(${r}, ${g}, ${b})`),
+                transparent: true,
+                opacity: 0.4 + token.weight * 0.5,
+                wireframe: true,
+              });
+              const mesh = new THREE.Mesh(geometry, material);
+              mesh.position.set(x, y, z);
+              scene.add(mesh);
+              tokenMeshes.push(mesh);
+            }
+
+            // Frame the camera
+            const cam = viz.getCamera();
+            if (cam) {
+              const maxR = 10 + count * 0.8;
+              cam.position.z = maxR * 1.5 + 30;
+            }
+          });
+        }
+      } catch (err) {
+        info3d.textContent = 'Three.js not loaded — 3D mode unavailable';
+        console.warn(err);
+      }
+    });
+
+    viz.addEventListener('vocab-change', (e) => {
+      infoVocab.textContent = e.detail.vocabId;
+      const bridge = viz.getBridge();
+      if (bridge) {
+        const info = bridge.vocabInfo(e.detail.vocabId);
+        if (info) infoVocabSize.textContent = info.vocab_size.toLocaleString();
+      }
+    });
+
+    function getCatColor(cat) {
+      const colors = {
+        whitespace:  [60, 70, 90],
+        punctuation: [120, 140, 170],
+        common_word: [0, 255, 204],
+        word:        [125, 244, 255],
+        numeric:     [255, 170, 50],
+        code:        [16, 185, 129],
+        special:     [255, 80, 120],
+        fragment:    [160, 120, 255],
+      };
+      return colors[cat] || [125, 244, 255];
+    }
+  </script>
+
+</body>
+</html>

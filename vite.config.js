@@ -10,11 +10,17 @@ export default defineConfig({
   },
   server: {
     port: 5173,
-    open: true,
+    open: '/token-demo.html',
+    fs: {
+      // Allow serving WASM from pkg/ and source from src/
+      allow: ['..'],
+    },
   },
   resolve: {
     alias: {
       '@': '/src',
     },
   },
+  // Ensure .wasm files are served correctly
+  assetsInclude: ['**/*.wasm'],
 });

@@ -1,0 +1,24 @@
+[package]
+name = "prompt-quant-wasm"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "WASM bindings for prompt-quant tokenizer"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+prompt-quant-core = { path = "../prompt-quant-core" }
+wasm-bindgen = "0.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde-wasm-bindgen = "0.6"
+js-sys = "0.3"
+
+[dependencies.web-sys]
+version = "0.3"
+features = ["console"]
+
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false
