@@ -4,6 +4,8 @@
  */
 
 import { calculateMetrics, createTopicSignature, computeTopicOverlap } from './metrics.js';
+import { computeSessionShape } from './session-shape.js';
+import { createOutcomeLink } from './outcome-link.js';
 
 /**
  * @typedef {Object} ContentBlock
@@ -93,6 +95,8 @@ import { calculateMetrics, createTopicSignature, computeTopicOverlap } from './m
  * @property {boolean} success - Whether parsing succeeded
  * @property {PromptNode[]} nodes - Parsed prompt nodes
  * @property {SessionMeta} meta - Session metadata
+ * @property {import('./session-shape.js').SessionShape} shape - Session-level shape descriptors
+ * @property {import('./outcome-link.js').OutcomeLink} outcomeLink - Outcome link scaffold
  * @property {ParseError[]} errors - Non-fatal parse issues
  */
 
@@ -329,11 +333,19 @@ export async function parseSession(jsonlPath) {
   
   // Build metadata
   const meta = buildSessionMeta(sessionId, nodes);
-  
+
+  // Compute session shape (the at-a-glance insight)
+  const shape = computeSessionShape(nodes);
+
+  // Create outcome link scaffold (to be populated with git/repo data later)
+  const outcomeLink = createOutcomeLink(sessionId);
+
   return {
     success: nodes.length > 0,
     nodes,
     meta,
+    shape,
+    outcomeLink,
     errors
   };
 }
@@ -476,11 +488,15 @@ export function parseSessionFromString(jsonlContent, sessionId = 'inline') {
   }
   
   const meta = buildSessionMeta(sessionId, nodes);
-  
+  const shape = computeSessionShape(nodes);
+  const outcomeLink = createOutcomeLink(sessionId);
+
   return {
     success: nodes.length > 0,
     nodes,
     meta,
+    shape,
+    outcomeLink,
     errors
   };
 }

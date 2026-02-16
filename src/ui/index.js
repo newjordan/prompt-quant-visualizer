@@ -5,6 +5,7 @@
 
 export { NavigationControls } from './navigation.js';
 export { DetailsPanel } from './details-panel.js';
+export { ShapeBadge } from './shape-badge.js';
 export { PromptQuantWidget } from './widget.js';
 
 // Default export is the main widget

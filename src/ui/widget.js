@@ -7,6 +7,7 @@
 
 import { NavigationControls } from './navigation.js';
 import { DetailsPanel } from './details-panel.js';
+import { ShapeBadge } from './shape-badge.js';
 
 export class PromptQuantWidget {
   constructor(options = {}) {
@@ -67,13 +68,16 @@ export class PromptQuantWidget {
     this.elements = {};
     this.nodes = [];
     this.meta = null;
+    this.shape = null;
+    this.outcomeLink = null;
     this.currentIndex = 0;
     this.autoPlayTimer = null;
-    
+
     // Sub-components
     this.renderer = null;
     this.navigation = null;
     this.detailsPanel = null;
+    this.shapeBadge = null;
 
     // Event handlers
     this.handlers = {
@@ -165,6 +169,10 @@ export class PromptQuantWidget {
     this.detailsPanel = new DetailsPanel(this.options.details);
     this.detailsPanel.mount(this.elements.overlay);
 
+    // Session shape badge (at-a-glance session classification)
+    this.shapeBadge = new ShapeBadge({ position: 'top-left' });
+    this.shapeBadge.mount(this.elements.overlay);
+
     // Renderer will be initialized when viz module is available
     // For now, we'll expose a hook for the viz engineer to connect
     this._initRenderer();
@@ -201,7 +209,7 @@ export class PromptQuantWidget {
         
         // If nodes are already loaded, pass them to renderer
         if (this.nodes.length > 0) {
-          this.renderer.setNodes(this.nodes);
+          this.renderer.setNodes(this.nodes, this.shape);
           this.renderer.focusNode(this.currentIndex);
         }
       } else {
@@ -277,7 +285,18 @@ export class PromptQuantWidget {
         if (result.success) {
           this.loadNodes(result.nodes);
           this.meta = result.meta;
-          this._emit('session:loaded', { nodes: result.nodes, meta: result.meta });
+          this.shape = result.shape || null;
+          this.outcomeLink = result.outcomeLink || null;
+
+          // Update shape badge with session-level analysis
+          if (this.shapeBadge && this.shape) {
+            this.shapeBadge.update(this.shape, this.outcomeLink);
+          }
+
+          this._emit('session:loaded', {
+            nodes: result.nodes, meta: result.meta,
+            shape: this.shape, outcomeLink: this.outcomeLink
+          });
           this._updateStatus('Loaded');
         } else {
           throw new Error(result.errors.map(e => e.message).join(', '));
@@ -361,9 +380,9 @@ export class PromptQuantWidget {
     // Update header badges
     this._updateBadges();
 
-    // Update renderer
+    // Update renderer (pass shape for shape-driven layout)
     if (this.renderer) {
-      this.renderer.setNodes(nodes);
+      this.renderer.setNodes(nodes, this.shape);
       this.renderer.focusNode(0);
     } else {
       // Update placeholder with node previews
@@ -603,6 +622,33 @@ export class PromptQuantWidget {
   }
 
   /**
+   * Get session shape analysis
+   * @returns {import('../data/session-shape.js').SessionShape|null}
+   */
+  getShape() {
+    return this.shape;
+  }
+
+  /**
+   * Get outcome link
+   * @returns {import('../data/outcome-link.js').OutcomeLink|null}
+   */
+  getOutcomeLink() {
+    return this.outcomeLink;
+  }
+
+  /**
+   * Update the outcome link (e.g. after git data is fetched)
+   * @param {import('../data/outcome-link.js').OutcomeLink} link
+   */
+  setOutcomeLink(link) {
+    this.outcomeLink = link;
+    if (this.shapeBadge && this.shape) {
+      this.shapeBadge.update(this.shape, this.outcomeLink);
+    }
+  }
+
+  /**
    * Clean up and remove from DOM
    */
   dispose() {
@@ -621,6 +667,11 @@ export class PromptQuantWidget {
     if (this.detailsPanel) {
       this.detailsPanel.dispose();
       this.detailsPanel = null;
+    }
+
+    if (this.shapeBadge) {
+      this.shapeBadge.dispose();
+      this.shapeBadge = null;
     }
 
     if (this.container) {

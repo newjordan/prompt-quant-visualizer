@@ -86,6 +86,7 @@
   
   <script type="module">
     import { PromptQuantWidget } from '../src/ui/index.js';
+    import { computeSessionShape } from '../src/data/session-shape.js';
     
     // Initialize widget
     const container = document.getElementById('app');
@@ -119,8 +120,11 @@
       console.error(`Widget error (${context}):`, error);
     });
     
-    widget.on('session:loaded', ({ nodes, meta }) => {
+    widget.on('session:loaded', ({ nodes, meta, shape }) => {
       console.log(`Loaded session with ${nodes.length} prompts`);
+      if (shape) {
+        console.log(`Session shape: ${shape.classification} (linearity=${shape.linearity}, density=${shape.density})`);
+      }
     });
     
     // Mount widget (this will emit 'ready')
@@ -174,7 +178,11 @@
         for (let i = 0; i < nodes.length - 1; i++) {
           nodes[i].nextId = nodes[i + 1].id;
         }
-        
+
+        // Compute session shape for the file-loaded data
+        const shape = computeSessionShape(nodes);
+        widget.shape = shape;
+        if (widget.shapeBadge) widget.shapeBadge.update(shape);
         widget.loadNodes(nodes);
         
       } catch (err) {
@@ -239,9 +247,13 @@
         nextId: i < demoPrompts.length - 1 ? `demo-${i + 1}` : null
       }));
       
+      // Compute session shape for demo data
+      const demoShape = computeSessionShape(demoNodes);
+      widget.shape = demoShape;
+      if (widget.shapeBadge) widget.shapeBadge.update(demoShape);
       widget.loadNodes(demoNodes);
     }
-    
+
     // Load demo data after a short delay
     setTimeout(loadDemoData, 500);
     

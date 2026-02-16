@@ -27,6 +27,24 @@
 // Core parsing functions
 export { parseSession, parseSessionFromString } from './parser.js';
 
+// Session shape analysis
+export { computeSessionShape, SESSION_CLASSIFICATIONS } from './session-shape.js';
+
+// Outcome linking
+export {
+  createOutcomeLink,
+  linkToRepo,
+  attachCommitRange,
+  attachDiffSummary,
+  setOutcome,
+  inferOutcome,
+  computeOutputScore,
+  storeLink,
+  retrieveLink,
+  retrieveAllLinks,
+  OUTCOMES
+} from './outcome-link.js';
+
 // Metrics calculation functions
 export {
   estimateTokens,
@@ -53,6 +71,8 @@ export {
  * @typedef {import('./parser.js').ParseError} ParseError
  * @typedef {import('./parser.js').Vector3} Vector3
  * @typedef {import('./metrics.js').TopicKeyword} TopicKeyword
+ * @typedef {import('./session-shape.js').SessionShape} SessionShape
+ * @typedef {import('./outcome-link.js').OutcomeLink} OutcomeLink
  */
 
 /**

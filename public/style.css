@@ -865,6 +865,181 @@ body.pqv-standalone {
 }
 
 /* ========================================
+   Session Shape Badge
+   ======================================== */
+.pqv-shape-badge {
+  position: absolute;
+  z-index: 20;
+  pointer-events: auto;
+}
+
+.pqv-shape-badge--top-left {
+  top: var(--pqv-spacing-md);
+  left: var(--pqv-spacing-md);
+}
+
+.pqv-shape-badge--top-right {
+  top: var(--pqv-spacing-md);
+  right: var(--pqv-spacing-md);
+}
+
+.pqv-shape-badge__inner {
+  min-width: 220px;
+  max-width: 280px;
+  padding: var(--pqv-spacing-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--pqv-spacing-sm);
+}
+
+.pqv-shape-badge__header {
+  display: flex;
+  align-items: baseline;
+  gap: var(--pqv-spacing-sm);
+  flex-wrap: wrap;
+}
+
+.pqv-shape-badge__classification {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.pqv-shape-badge__node-count,
+.pqv-shape-badge__duration {
+  font-size: 10px;
+  color: var(--pqv-fg-muted);
+  letter-spacing: 0.04em;
+}
+
+.pqv-shape-badge__description {
+  font-size: 10px;
+  color: var(--pqv-fg-muted);
+  line-height: 1.4;
+}
+
+.pqv-shape-badge__bars {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pqv-shape-badge__bar {
+  display: grid;
+  grid-template-columns: 72px 1fr 28px;
+  align-items: center;
+  gap: 6px;
+}
+
+.pqv-shape-badge__bar-label {
+  font-size: 9px;
+  color: var(--pqv-fg-muted);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-align: right;
+}
+
+.pqv-shape-badge__bar-track {
+  height: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 2px;
+  overflow: hidden;
+  position: relative;
+}
+
+.pqv-shape-badge__bar-track--centered {
+  overflow: visible;
+}
+
+.pqv-shape-badge__bar-center {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.pqv-shape-badge__bar-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.4s ease;
+}
+
+.pqv-shape-badge__bar-fill--convergence {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  border-radius: 2px;
+}
+
+.pqv-shape-badge__bar-value {
+  font-size: 9px;
+  color: var(--pqv-fg-muted);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Sparklines */
+.pqv-shape-badge__sparklines {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: var(--pqv-spacing-xs);
+  border-top: 1px solid rgba(146, 231, 255, 0.08);
+}
+
+.pqv-shape-badge__sparkline {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pqv-shape-badge__sparkline-label {
+  font-size: 9px;
+  color: var(--pqv-fg-muted);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  width: 72px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.pqv-sparkline {
+  flex: 1;
+  height: 24px;
+  display: block;
+}
+
+/* Outcome section */
+.pqv-shape-badge__outcome {
+  display: flex;
+  align-items: center;
+  gap: var(--pqv-spacing-sm);
+  flex-wrap: wrap;
+  padding-top: var(--pqv-spacing-xs);
+  border-top: 1px solid rgba(146, 231, 255, 0.08);
+}
+
+.pqv-shape-badge__outcome-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.pqv-shape-badge__outcome-repo,
+.pqv-shape-badge__outcome-branch,
+.pqv-shape-badge__outcome-commits {
+  font-size: 9px;
+  color: var(--pqv-fg-muted);
+  padding: 1px 6px;
+  border: 1px solid rgba(146, 231, 255, 0.15);
+  border-radius: 3px;
+}
+
+/* ========================================
    Responsive Adjustments
    ======================================== */
 @media (max-width: 768px) {
@@ -903,6 +1078,16 @@ body.pqv-standalone {
   }
   
   .pqv-nav__timeline {
+    display: none;
+  }
+
+  .pqv-shape-badge__inner {
+    min-width: 180px;
+    max-width: 200px;
+    padding: var(--pqv-spacing-sm);
+  }
+
+  .pqv-shape-badge__sparklines {
     display: none;
   }
 }

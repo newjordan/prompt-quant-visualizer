@@ -73,7 +73,7 @@ const LAYOUT_ALGORITHMS = {
       // Forward progression in Z with lateral variance
       const variance = Math.sin(index * 0.7) * spacing * 0.3;
       const yVariance = Math.cos(index * 0.5) * spacing * 0.2;
-      
+
       node.position = {
         x: variance,
         y: yVariance,
@@ -81,7 +81,7 @@ const LAYOUT_ALGORITHMS = {
       };
     });
   },
-  
+
   /**
    * Cluster layout: nodes cluster based on similarity (placeholder).
    */
@@ -90,7 +90,7 @@ const LAYOUT_ALGORITHMS = {
     nodes.forEach((node, index) => {
       const angle = index * 0.5;
       const radius = 50 + index * spacing * 0.15;
-      
+
       node.position = {
         x: Math.cos(angle) * radius,
         y: Math.sin(index * 0.3) * spacing * 0.4,
@@ -98,7 +98,7 @@ const LAYOUT_ALGORITHMS = {
       };
     });
   },
-  
+
   /**
    * Spiral layout: nodes arranged in a 3D spiral.
    */
@@ -107,11 +107,87 @@ const LAYOUT_ALGORITHMS = {
       const angle = index * 0.4;
       const radius = 100 + index * 8;
       const height = index * spacing * 0.3;
-      
+
       node.position = {
         x: Math.cos(angle) * radius,
         y: Math.sin(angle) * radius * 0.5,
         z: -height
+      };
+    });
+  },
+
+  /**
+   * Shape-driven layout: session shape descriptors control the visual form.
+   *
+   * A focused session (high linearity, high density) produces a tight,
+   * nearly-straight bead chain. A scattered session (low linearity,
+   * high breadth) sprawls outward like a neural map.
+   *
+   * The shape IS the insight — you glance at it and know.
+   *
+   * @param {Array} nodes - PromptNode array
+   * @param {number} spacing - Base spacing
+   * @param {import('../data/session-shape.js').SessionShape} [shape] - Session shape data
+   */
+  shape(nodes, spacing, shape) {
+    if (!shape || nodes.length === 0) {
+      // Fall back to path layout if no shape data
+      LAYOUT_ALGORITHMS.path(nodes, spacing);
+      return;
+    }
+
+    const { linearity, density, breadth, convergence } = shape;
+
+    // --- Compute layout parameters from shape ---
+
+    // Lateral spread: low linearity = wide meander, high = tight line
+    // Range: 0.05 (laser straight) to 0.8 (wild swings)
+    const lateralFactor = 0.05 + (1 - linearity) * 0.75;
+
+    // Y spread: breadth drives vertical variance (more topics = more Y range)
+    const yFactor = 0.05 + breadth * 0.5;
+
+    // Spacing consistency: high density = uniform spacing, low = varied
+    const spacingVariance = (1 - density) * 0.5;
+
+    // Direction change frequency: low linearity = frequent turns
+    const turnFrequency = 0.3 + (1 - linearity) * 0.8;
+
+    // Convergence affects whether the path tightens or loosens over time
+    // Positive convergence = funnel inward, negative = expand outward
+    const convergenceRate = convergence * 0.3;
+
+    // --- Lay out nodes ---
+    nodes.forEach((node, index) => {
+      const t = nodes.length > 1 ? index / (nodes.length - 1) : 0; // 0..1 progress
+
+      // Per-node drift drives individual displacement
+      const drift = node.metrics?.topicDriftScore ?? 0;
+      const complexity = (node.metrics?.complexityScore ?? 50) / 100;
+
+      // Convergence modulates spread over time
+      // At t=0, full spread. At t=1, spread * (1 - convergenceRate)
+      const spreadModifier = 1 - convergenceRate * t;
+
+      // Base forward progression
+      const baseSpacing = spacing * (1 + (Math.random() - 0.5) * spacingVariance * 2);
+
+      // Lateral displacement driven by drift + a gentle sine wave for organic feel
+      const lateralDisplacement = (
+        Math.sin(index * turnFrequency) * spacing * lateralFactor +
+        drift * spacing * lateralFactor * 1.5
+      ) * spreadModifier;
+
+      // Y displacement driven by complexity + breadth factor
+      const yDisplacement = (
+        Math.cos(index * turnFrequency * 0.7) * spacing * yFactor +
+        (complexity - 0.5) * spacing * yFactor
+      ) * spreadModifier;
+
+      node.position = {
+        x: lateralDisplacement,
+        y: yDisplacement,
+        z: -index * baseSpacing
       };
     });
   },
@@ -506,16 +582,24 @@ export class StarmapRenderer {
   /**
    * Set the complete node array.
    * @param {PromptNode[]} nodes - Array of prompt nodes
+   * @param {import('../data/session-shape.js').SessionShape} [shape] - Session shape for layout
    */
-  setNodes(nodes) {
+  setNodes(nodes, shape) {
     // Clear existing
     this.clearAllObjects();
-    
+
     this.nodes = nodes;
-    
-    // Calculate positions based on layout
-    const layoutFn = LAYOUT_ALGORITHMS[this.options.layout] || LAYOUT_ALGORITHMS.path;
-    layoutFn(this.nodes, this.options.nodeSpacing);
+    this.sessionShape = shape || null;
+
+    // Use shape-driven layout if shape data is available, otherwise fall back to configured layout
+    const layoutKey = shape ? 'shape' : this.options.layout;
+    const layoutFn = LAYOUT_ALGORITHMS[layoutKey] || LAYOUT_ALGORITHMS.path;
+
+    if (layoutKey === 'shape') {
+      layoutFn(this.nodes, this.options.nodeSpacing, shape);
+    } else {
+      layoutFn(this.nodes, this.options.nodeSpacing);
+    }
     
     // Create visual objects for each node
     this.nodes.forEach((node, index) => {
