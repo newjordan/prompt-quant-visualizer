@@ -1,11 +1,17 @@
 /**
  * satellites.js - Satellite/complexity indicators orbiting nodes
- * 
- * Satellites orbit their parent node to represent metrics:
+ *
+ * Metric satellites (existing):
  * - Token count: Sphere (blue)
  * - Tool calls: Cubes (green/orange per type)
  * - Response latency: Tetrahedron (pink)
  * - Topic drift: Sphere (purple)
+ *
+ * Content-type satellites (new):
+ * - Image:      Smooth sphere (warm orange) — visual, self-contained
+ * - Link/URL:   Diamond/octahedron (cyan) — points outward, referential
+ * - Code block:  Rectangular prism (green) — structured, literal
+ * - File ref:   Flat disc (amber) — like a document page
  */
 
 import * as THREE from 'three';
@@ -22,6 +28,12 @@ export const SATELLITE_COLORS = {
   toolWeb: 0x00D4FF,      // Cyan - web/API calls
   toolBrowser: 0xFF3366,  // Magenta - browser actions
   toolSystem: 0xE8E8E8,   // White - system commands
+
+  // Content-type satellite colors
+  contentImage:     0xFFAA55,  // Warm orange — visual content
+  contentLink:      0x22D3EE,  // Stream cyan — external reference
+  contentCodeBlock: 0x10B981,  // Green — structured code
+  contentFileRef:   0xF5A623,  // Amber — file reference
 };
 
 // === Satellite Configuration (from SPEC.md and art direction) ===
@@ -101,9 +113,38 @@ function createSatelliteGeometry(shape, size) {
       return new THREE.BoxGeometry(size, size, size);
     case 'tetrahedron':
       return new THREE.TetrahedronGeometry(size);
+    // --- Content-type shapes ---
+    case 'diamond':
+      // Octahedron stretched vertically — points outward like a reference
+      return createDiamondGeometry(size);
+    case 'prism':
+      // Rectangular prism — structured, blocky like code
+      return new THREE.BoxGeometry(size * 1.6, size * 0.8, size * 0.6);
+    case 'disc':
+      // Flat cylinder — like a document page
+      return new THREE.CylinderGeometry(size, size, size * 0.2, 8);
     default:
       return new THREE.SphereGeometry(size, 8, 6);
   }
+}
+
+/**
+ * Create diamond geometry — an octahedron stretched on Y axis.
+ * The split-center look comes from the wireframe rendering of the
+ * octahedron's equatorial edges.
+ * @param {number} size
+ * @returns {THREE.BufferGeometry}
+ */
+function createDiamondGeometry(size) {
+  const geo = new THREE.OctahedronGeometry(size);
+  // Stretch Y axis for the diamond silhouette
+  const positions = geo.getAttribute('position');
+  for (let i = 0; i < positions.count; i++) {
+    positions.setY(i, positions.getY(i) * 1.5);
+  }
+  positions.needsUpdate = true;
+  geo.computeVertexNormals();
+  return geo;
 }
 
 /**
@@ -205,7 +246,12 @@ export function createSatellites(metrics) {
   if (metrics.toolTypes && metrics.toolTypes.length > 0) {
     createToolTypeSatellites(group, metrics.toolTypes);
   }
-  
+
+  // Create content-type satellites (images, links, code blocks, file refs)
+  if (metrics.contentTypes && metrics.contentTypes.length > 0) {
+    createContentTypeSatellites(group, metrics.contentTypes);
+  }
+
   return group;
 }
 
@@ -263,6 +309,91 @@ function createToolTypeSatellites(group, toolTypes) {
 }
 
 /**
+ * Content-type → satellite config mapping.
+ * Each content type found in a prompt gets its own orbiting indicator.
+ */
+const CONTENT_TYPE_SATELLITE_CONFIG = {
+  image: {
+    shape: 'sphere',
+    color: SATELLITE_COLORS.contentImage,
+    baseSize: 4,
+    sizePerCount: 1.5,
+    orbitRadius: 60,
+    orbitSpeed: 0.35,
+    label: 'Image',
+  },
+  link: {
+    shape: 'diamond',
+    color: SATELLITE_COLORS.contentLink,
+    baseSize: 3.5,
+    sizePerCount: 1,
+    orbitRadius: 65,
+    orbitSpeed: -0.45,
+    label: 'Link',
+  },
+  codeBlock: {
+    shape: 'prism',
+    color: SATELLITE_COLORS.contentCodeBlock,
+    baseSize: 4,
+    sizePerCount: 1,
+    orbitRadius: 70,
+    orbitSpeed: 0.3,
+    label: 'Code',
+  },
+  fileRef: {
+    shape: 'disc',
+    color: SATELLITE_COLORS.contentFileRef,
+    baseSize: 3.5,
+    sizePerCount: 0.5,
+    orbitRadius: 75,
+    orbitSpeed: -0.35,
+    label: 'File',
+  },
+};
+
+/**
+ * Create satellites for content types found in the prompt.
+ * @param {THREE.Group} group - Parent satellite group
+ * @param {{type: string, count: number}[]} contentTypes - Detected content types
+ */
+function createContentTypeSatellites(group, contentTypes) {
+  contentTypes.forEach((ct, index) => {
+    const config = CONTENT_TYPE_SATELLITE_CONFIG[ct.type];
+    if (!config) return;
+
+    const size = config.baseSize + (ct.count - 1) * config.sizePerCount;
+    const geometry = createSatelliteGeometry(config.shape, size);
+    const material = new THREE.MeshBasicMaterial({
+      color: config.color,
+      transparent: true,
+      opacity: 0.7,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+
+    const satellite = new THREE.Mesh(geometry, material);
+    satellite.userData.metric = 'contentType';
+    satellite.userData.contentType = ct.type;
+    satellite.userData.contentLabel = config.label;
+    satellite.userData.value = ct.count;
+    satellite.userData.orbitRadius = config.orbitRadius;
+    satellite.userData.orbitSpeed = config.orbitSpeed;
+    satellite.userData.orbitOffset = (index / contentTypes.length) * Math.PI * 2;
+
+    // Initial position
+    const phase = satellite.userData.orbitOffset;
+    const tilt = Math.PI * 0.18;
+    const x = config.orbitRadius * Math.cos(phase);
+    const y = config.orbitRadius * Math.sin(phase) * Math.sin(tilt);
+    const z = config.orbitRadius * Math.sin(phase) * Math.cos(tilt);
+    satellite.position.set(x, y, z);
+
+    group.userData.orbitPhases.set(satellite.uuid, phase);
+    group.add(satellite);
+  });
+}
+
+/**
  * Animate satellites in their orbits.
  * @param {THREE.Group} satelliteGroup - The satellite group
  * @param {number} deltaTime - Time since last frame in seconds
@@ -296,10 +427,17 @@ export function animateSatellites(satelliteGroup, deltaTime, totalTime) {
     const scale = 1 + pulseFactor * SATELLITE_CONFIG.pulseAmplitude;
     satellite.scale.setScalar(scale);
     
-    // Slight rotation for cubes
-    if (satellite.geometry.type === 'BoxGeometry') {
+    // Rotation for non-spherical shapes
+    const geoType = satellite.geometry.type;
+    if (geoType === 'BoxGeometry') {
       satellite.rotation.x += deltaTime * 0.5;
       satellite.rotation.y += deltaTime * 0.3;
+    } else if (geoType === 'OctahedronGeometry') {
+      // Diamond: slow elegant tumble
+      satellite.rotation.y += deltaTime * 0.4;
+    } else if (geoType === 'CylinderGeometry') {
+      // Disc: spin flat like a coin
+      satellite.rotation.y += deltaTime * 0.6;
     }
   });
 }
@@ -328,12 +466,15 @@ export function getSatelliteLabel(satellite) {
   const value = satellite.userData.value;
   const toolName = satellite.userData.toolName;
   
+  const contentLabel = satellite.userData.contentLabel;
+
   const labels = {
     tokenEstimate: `Tokens: ~${value}`,
     toolCallCount: `Tools: ${value}`,
     responseLatencyMs: `Latency: ${(value / 1000).toFixed(1)}s`,
     topicDriftScore: `Drift: ${(value * 100).toFixed(0)}%`,
     toolType: `Tool: ${toolName}`,
+    contentType: `${contentLabel}: ${value}`,
   };
   
   return {

@@ -336,6 +336,144 @@ export function calculateComplexity({ charCount, toolCallCount, responseLatencyM
 }
 
 /**
+ * Intent types for prompt classification.
+ * Drives node wireframe color in the visualizer.
+ * @type {Object<string, {label: string, color: number}>}
+ */
+export const INTENT_TYPES = {
+  question:      { label: 'Question',      color: 0x7DDFFF },  // Soft blue — seeking
+  command:       { label: 'Command',       color: 0x00FFCC },  // Cyan-green — directive
+  clarification: { label: 'Clarification', color: 0xAA44FF },  // Purple — refining
+  creative:      { label: 'Creative',      color: 0xFFD085 },  // Amber — exploratory
+  error:         { label: 'Error/Fix',     color: 0xFF5A5A },  // Red — something broke
+  informational: { label: 'Informational', color: 0x84FFD1 },  // Soft green — sharing context
+};
+
+/**
+ * Classify prompt intent from text content.
+ * Uses heuristics — doesn't need to be perfect, just directionally right.
+ *
+ * @param {string} text - Prompt text
+ * @param {number} questionCount - Number of question marks
+ * @param {string[]} imperativeVerbs - Imperative verbs found
+ * @returns {string} Intent key from INTENT_TYPES
+ */
+export function classifyIntent(text, questionCount, imperativeVerbs) {
+  if (!text) return 'command';
+
+  const lower = text.toLowerCase();
+  const wordCount = text.split(/\s+/).filter(Boolean).length;
+
+  // Error/fix signals — check first, these are high-signal
+  const errorPatterns = /\b(error|bug|fix|broke|broken|crash|fail|issue|wrong|doesn'?t work|not working|exception|stack ?trace|traceback)\b/i;
+  if (errorPatterns.test(text)) {
+    return 'error';
+  }
+
+  // Clarification signals — short follow-ups that refine a prior turn
+  const clarificationPatterns = /\b(actually|instead|i meant|rather|what i mean|no,? |wait|sorry|correction|let me clarify|not that|the other)\b/i;
+  if (clarificationPatterns.test(text) && wordCount < 40) {
+    return 'clarification';
+  }
+
+  // Question-dominant
+  if (questionCount >= 2 || (questionCount >= 1 && wordCount < 25)) {
+    // Check if it's "how do I" / "what is" style vs "can you do X?" style
+    const pureQuestion = /^(what|how|why|when|where|who|which|is |are |does |do |can |could |would |should )/i;
+    if (pureQuestion.test(text.trim())) {
+      return 'question';
+    }
+    // "Can you X?" is still a command disguised as a question
+    if (/^can you /i.test(text.trim())) {
+      return 'command';
+    }
+    return 'question';
+  }
+
+  // Creative / open-ended signals
+  const creativePatterns = /\b(write|create|generate|imagine|story|poem|haiku|creative|brainstorm|suggest|ideas? for|come up with)\b/i;
+  if (creativePatterns.test(text) && !errorPatterns.test(text)) {
+    return 'creative';
+  }
+
+  // Informational — sharing context without a clear ask
+  const informationalPatterns = /\b(here'?s|fyi|for context|note that|i should mention|background|context:)\b/i;
+  if (informationalPatterns.test(text) && questionCount === 0 && imperativeVerbs.length === 0) {
+    return 'informational';
+  }
+
+  // Command — has imperative verbs or is short and directive
+  if (imperativeVerbs.length > 0) {
+    return 'command';
+  }
+
+  // Default: if it has a question mark anywhere, question; otherwise command
+  if (questionCount > 0) return 'question';
+  return 'command';
+}
+
+/**
+ * Content attachment types that can appear in a prompt.
+ * Each type gets a distinct satellite shape in the visualizer.
+ */
+export const CONTENT_TYPES = {
+  image:     { label: 'Image',     shape: 'sphere',     color: 0xFFAA55 },
+  link:      { label: 'Link',      shape: 'diamond',    color: 0x22D3EE },
+  codeBlock: { label: 'Code',      shape: 'prism',      color: 0x10B981 },
+  fileRef:   { label: 'File',      shape: 'disc',       color: 0xF5A623 },
+};
+
+/**
+ * Detect content attachments/embeds in prompt text.
+ *
+ * @param {string} text - Prompt text
+ * @param {import('../data/parser.js').ContentBlock[]} [contentBlocks] - Raw content blocks from JSONL
+ * @returns {{type: string, count: number}[]} Detected content types with counts
+ */
+export function detectContentTypes(text, contentBlocks) {
+  const results = [];
+
+  // --- Images ---
+  let imageCount = 0;
+  // Check content blocks for image type
+  if (contentBlocks) {
+    imageCount += contentBlocks.filter(b => b.type === 'image').length;
+  }
+  // Check text for image references
+  const imagePatterns = /\.(png|jpg|jpeg|gif|svg|webp|bmp)\b/gi;
+  const imageTextMatches = text?.match(imagePatterns);
+  if (imageTextMatches) imageCount += imageTextMatches.length;
+  if (imageCount > 0) results.push({ type: 'image', count: imageCount });
+
+  // --- Links ---
+  const linkPattern = /https?:\/\/[^\s)>\]]+/g;
+  const linkMatches = text?.match(linkPattern);
+  if (linkMatches && linkMatches.length > 0) {
+    results.push({ type: 'link', count: linkMatches.length });
+  }
+
+  // --- Code blocks ---
+  const codeBlockPattern = /```[\s\S]*?```/g;
+  const codeMatches = text?.match(codeBlockPattern);
+  // Also count inline code that's substantial (>20 chars)
+  const inlineCodePattern = /`[^`]{20,}`/g;
+  const inlineMatches = text?.match(inlineCodePattern);
+  const totalCode = (codeMatches?.length || 0) + (inlineMatches?.length || 0);
+  if (totalCode > 0) results.push({ type: 'codeBlock', count: totalCode });
+
+  // --- File references ---
+  const fileRefPattern = /\b[\w\-./]+\.(js|ts|py|rs|go|java|cpp|c|h|css|html|json|yaml|yml|toml|md|txt|sh|sql|rb|php|swift|kt)\b/g;
+  const fileMatches = text?.match(fileRefPattern);
+  if (fileMatches && fileMatches.length > 0) {
+    // Deduplicate
+    const unique = [...new Set(fileMatches)];
+    results.push({ type: 'fileRef', count: unique.length });
+  }
+
+  return results;
+}
+
+/**
  * @typedef {Object} PromptMetrics
  * @property {number} charCount
  * @property {number} wordCount
@@ -353,6 +491,8 @@ export function calculateComplexity({ charCount, toolCallCount, responseLatencyM
  * @property {number} questionCount
  * @property {number} thinkingIntensity
  * @property {number} toolDiversity
+ * @property {string} intent - Prompt intent classification (question, command, etc.)
+ * @property {{type: string, count: number}[]} contentTypes - Detected content attachments
  */
 
 /**
@@ -362,29 +502,30 @@ export function calculateComplexity({ charCount, toolCallCount, responseLatencyM
  * @param {{name: string}[]} toolCalls - Tool calls from response
  * @param {{text: string, length: number}[]} thinkingBlocks - Thinking blocks from response
  * @param {number} topicOverlap - Topic overlap with previous prompt (0-1)
+ * @param {import('../data/parser.js').ContentBlock[]} [contentBlocks] - Raw content blocks
  * @returns {PromptMetrics} All computed metrics
  */
-export function calculateMetrics(text, responseLatencyMs, toolCalls, thinkingBlocks, topicOverlap) {
+export function calculateMetrics(text, responseLatencyMs, toolCalls, thinkingBlocks, topicOverlap, contentBlocks) {
   // Basic text metrics
   const charCount = text?.length || 0;
   const wordCount = countWords(text);
   const tokenEstimate = estimateTokens(text);
   const sentenceCount = countSentences(text);
   const questionCount = countQuestions(text);
-  
+
   // Tool metrics
   const { count: toolCallCount, uniqueTools: toolTypes, categories: toolCategories, diversityScore: toolDiversity } = calculateToolDiversity(toolCalls);
-  
+
   // Thinking intensity
   const thinkingIntensity = computeThinkingIntensity(thinkingBlocks);
-  
+
   // Latency
   const latencyBucket = getLatencyBucket(responseLatencyMs);
-  
+
   // Topic metrics
   const similarityToPrev = topicOverlap;
   const topicDriftScore = topicOverlap !== null ? 1 - topicOverlap : null;
-  
+
   // Focus score
   const focusScore = computeFocusScore({
     charCount,
@@ -393,14 +534,21 @@ export function calculateMetrics(text, responseLatencyMs, toolCalls, thinkingBlo
     toolDiversity,
     topicOverlap
   });
-  
+
   // Complexity score
   const complexityScore = calculateComplexity({
     charCount,
     toolCallCount,
     responseLatencyMs
   });
-  
+
+  // Intent classification
+  const imperativeVerbs = extractImperativeVerbs(text);
+  const intent = classifyIntent(text, questionCount, imperativeVerbs);
+
+  // Content type detection
+  const contentTypes = detectContentTypes(text, contentBlocks);
+
   return {
     charCount,
     wordCount,
@@ -413,11 +561,13 @@ export function calculateMetrics(text, responseLatencyMs, toolCalls, thinkingBlo
     similarityToPrev,
     topicDriftScore,
     complexityScore,
-    focusScore: Math.round(focusScore * 100) / 100, // Round to 2 decimals
+    focusScore: Math.round(focusScore * 100) / 100,
     sentenceCount,
     questionCount,
     thinkingIntensity: Math.round(thinkingIntensity * 100) / 100,
-    toolDiversity: Math.round(toolDiversity * 100) / 100
+    toolDiversity: Math.round(toolDiversity * 100) / 100,
+    intent,
+    contentTypes,
   };
 }
 
@@ -427,6 +577,7 @@ export default {
   countSentences,
   countQuestions,
   extractKeywords,
+  extractImperativeVerbs,
   createTopicSignature,
   computeTopicOverlap,
   computeFocusScore,
@@ -434,5 +585,9 @@ export default {
   calculateMetrics,
   calculateToolDiversity,
   getLatencyBucket,
-  computeThinkingIntensity
+  computeThinkingIntensity,
+  classifyIntent,
+  detectContentTypes,
+  INTENT_TYPES,
+  CONTENT_TYPES,
 };

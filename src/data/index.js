@@ -59,7 +59,12 @@ export {
   calculateMetrics,
   calculateToolDiversity,
   getLatencyBucket,
-  computeThinkingIntensity
+  computeThinkingIntensity,
+  classifyIntent,
+  detectContentTypes,
+  extractImperativeVerbs,
+  INTENT_TYPES,
+  CONTENT_TYPES
 } from './metrics.js';
 
 // Re-export types via JSDoc for documentation

@@ -840,15 +840,19 @@ export class StarmapRenderer {
   }
   
   createNodeObjects(node, index) {
-    // Create node geometry
+    // Create node geometry — shape from words, color from intent
     const complexity = node.metrics?.complexityScore || 50;
     const tokenCount = node.metrics?.tokenEstimate || 100;
+    const wordCount = node.metrics?.wordCount || 30;
+    const intent = node.metrics?.intent || 'command';
     const isActive = index === this.currentIndex;
     const isHistorical = index < this.currentIndex;
-    
+
     const nodeGroup = createNode({
       complexity,
       tokenCount,
+      wordCount,
+      intent,
       isActive,
       isHistorical,
     });

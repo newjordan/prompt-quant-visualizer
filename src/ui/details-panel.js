@@ -258,6 +258,31 @@ export class DetailsPanel {
       });
     }
 
+    // Intent classification
+    if (metrics.intent) {
+      const intentLabels = {
+        question: 'Question', command: 'Command', clarification: 'Clarification',
+        creative: 'Creative', error: 'Error/Fix', informational: 'Info'
+      };
+      metricItems.push({
+        label: 'Intent',
+        value: intentLabels[metrics.intent] || metrics.intent,
+        icon: '?'
+      });
+    }
+
+    // Content types
+    if (metrics.contentTypes && metrics.contentTypes.length > 0) {
+      const ctSummary = metrics.contentTypes
+        .map(ct => `${ct.count} ${ct.type}`)
+        .join(', ');
+      metricItems.push({
+        label: 'Content',
+        value: ctSummary,
+        icon: '+'
+      });
+    }
+
     grid.innerHTML = metricItems.map(item => `
       <div class="pqv-details__metric ${item.highlight ? 'pqv-details__metric--highlight' : ''} ${item.level ? `pqv-details__metric--${item.level}` : ''}">
         <span class="pqv-details__metric-icon">${item.icon}</span>
