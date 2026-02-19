@@ -1,10 +1,13 @@
 /**
- * nodes.js - Node geometry (wireframe primitives, glowing materials)
- * 
- * Creates glowing wireframe nodes based on complexity score.
- * Low complexity: Icosahedron (20 faces)
- * Medium complexity: Octahedron (8 faces)
- * High complexity: Dodecahedron (12 faces)
+ * nodes.js - Node geometry (fractal wireframe nodes, glowing materials)
+ *
+ * Creates glowing wireframe nodes using recursive fractal subdivision.
+ * Complexity maps continuously to fractal depth:
+ *   0-20%  → depth 0  (clean icosahedron, few vertices)
+ *   20-50% → depth ~1 (first subdivision, spiky)
+ *   50-80% → depth ~2 (dense wireframe, glows hot in bloom)
+ *   80-100% → depth 3  (intricate fractal, almost organic)
+ * Fractional depths subdivide a percentage of faces for smooth scaling.
  */
 
 import * as THREE from 'three';
@@ -25,52 +28,185 @@ const NODE_CONFIG = {
   baseRadius: 15,
   minRadius: 10,
   maxRadius: 25,
-  
+
   // Wireframe material settings
   wireframeOpacity: 0.72,
   wireframeOpacityActive: 0.92,
   wireframeOpacityHistorical: 0.35,
-  
+
   // Vertex glow settings
   vertexGlowRadius: 0.08,
   vertexGlowIntensity: 1.2,
-  
+
   // Animation
   breathDuration: 3500,
   breathScaleMin: 1.0,
   breathScaleMax: 1.03,
+
+  // Fractal settings
+  fractalMaxDepth: 3,
+  fractalExtrudeRatio: 0.3, // How far centroids push outward (fraction of radius)
 };
 
+// === Fractal Geometry ===
+
 /**
- * Determine node shape based on complexity score.
+ * Map complexity (0-100) to a continuous fractal depth (0-3).
+ * The curve is slightly eased so low-complexity prompts stay clean.
  * @param {number} complexity - 0-100 complexity score
- * @returns {'icosahedron' | 'octahedron' | 'dodecahedron'}
+ * @returns {number} Continuous fractal depth (0 to fractalMaxDepth)
  */
-export function getShapeForComplexity(complexity) {
-  if (complexity < 34) return 'icosahedron';
-  if (complexity < 67) return 'octahedron';
-  return 'dodecahedron';
+export function complexityToFractalDepth(complexity) {
+  const t = Math.max(0, Math.min(complexity, 100)) / 100;
+  // Ease-in curve: low complexity stays flat, high complexity ramps
+  const eased = t * t * (3 - 2 * t); // smoothstep
+  return eased * NODE_CONFIG.fractalMaxDepth;
 }
 
 /**
- * Create geometry for a given shape type.
- * @param {string} shape - Shape type
- * @param {number} radius - Node radius
+ * Determine a shape descriptor from complexity (kept for API compat).
+ * @param {number} complexity - 0-100 complexity score
+ * @returns {string} Human-readable fractal depth descriptor
+ */
+export function getShapeForComplexity(complexity) {
+  const depth = complexityToFractalDepth(complexity);
+  if (depth < 0.5) return 'fractal-d0';
+  if (depth < 1.5) return 'fractal-d1';
+  if (depth < 2.5) return 'fractal-d2';
+  return 'fractal-d3';
+}
+
+/**
+ * Subdivide a single triangle into 3 child triangles by extruding the centroid.
+ * The centroid is pushed outward along its normal (away from origin) by extrudeDistance.
+ * @param {number[]} a - Vertex A [x, y, z]
+ * @param {number[]} b - Vertex B [x, y, z]
+ * @param {number[]} c - Vertex C [x, y, z]
+ * @param {number} radius - Target sphere radius (for normalizing extrusion)
+ * @returns {Array<[number[], number[], number[]]>} Three child triangles
+ */
+function subdivideFace(a, b, c, radius) {
+  // Centroid of the triangle
+  const cx = (a[0] + b[0] + c[0]) / 3;
+  const cy = (a[1] + b[1] + c[1]) / 3;
+  const cz = (a[2] + b[2] + c[2]) / 3;
+
+  // Push centroid outward along its direction from origin
+  const len = Math.sqrt(cx * cx + cy * cy + cz * cz) || 1;
+  const extrudeDist = radius * NODE_CONFIG.fractalExtrudeRatio;
+  const nx = cx / len;
+  const ny = cy / len;
+  const nz = cz / len;
+
+  const peak = [
+    cx + nx * extrudeDist,
+    cy + ny * extrudeDist,
+    cz + nz * extrudeDist,
+  ];
+
+  // Three child triangles: each original edge paired with the peak
+  return [
+    [a, b, peak],
+    [b, c, peak],
+    [c, a, peak],
+  ];
+}
+
+/**
+ * Compute the area of a triangle (used for sorting faces for partial subdivision).
+ * @param {number[]} a
+ * @param {number[]} b
+ * @param {number[]} c
+ * @returns {number}
+ */
+function triangleArea(a, b, c) {
+  const abx = b[0] - a[0], aby = b[1] - a[1], abz = b[2] - a[2];
+  const acx = c[0] - a[0], acy = c[1] - a[1], acz = c[2] - a[2];
+  const crossX = aby * acz - abz * acy;
+  const crossY = abz * acx - abx * acz;
+  const crossZ = abx * acy - aby * acx;
+  return 0.5 * Math.sqrt(crossX * crossX + crossY * crossY + crossZ * crossZ);
+}
+
+/**
+ * Create fractal geometry by recursively subdividing an icosahedron.
+ * Supports fractional depth: at non-integer depths, only a fraction of faces
+ * get the final subdivision level (largest faces first), creating smooth scaling.
+ *
+ * @param {number} radius - Outer radius of the base icosahedron
+ * @param {number} depth - Continuous fractal depth (0-3). Integer part = full levels,
+ *                         fractional part = percentage of faces subdivided at next level.
  * @returns {THREE.BufferGeometry}
  */
-function createShapeGeometry(shape, radius) {
-  switch (shape) {
-    case 'icosahedron':
-      return new THREE.IcosahedronGeometry(radius, 1);
-    case 'octahedron':
-      return new THREE.OctahedronGeometry(radius);
-    case 'dodecahedron':
-      return new THREE.DodecahedronGeometry(radius);
-    case 'tetrahedron':
-      return new THREE.TetrahedronGeometry(radius);
-    default:
-      return new THREE.IcosahedronGeometry(radius, 1);
+function createFractalGeometry(radius, depth) {
+  // Start with a base icosahedron — extract its triangle faces
+  const base = new THREE.IcosahedronGeometry(radius, 0);
+  const posAttr = base.getAttribute('position');
+
+  // Collect faces as arrays of 3 vertices
+  let faces = [];
+  for (let i = 0; i < posAttr.count; i += 3) {
+    faces.push([
+      [posAttr.getX(i), posAttr.getY(i), posAttr.getZ(i)],
+      [posAttr.getX(i + 1), posAttr.getY(i + 1), posAttr.getZ(i + 1)],
+      [posAttr.getX(i + 2), posAttr.getY(i + 2), posAttr.getZ(i + 2)],
+    ]);
   }
+  base.dispose();
+
+  const fullLevels = Math.floor(depth);
+  const fractional = depth - fullLevels;
+
+  // Apply full subdivision levels
+  for (let level = 0; level < fullLevels; level++) {
+    const next = [];
+    for (const [a, b, c] of faces) {
+      next.push(...subdivideFace(a, b, c, radius));
+    }
+    faces = next;
+  }
+
+  // Apply partial subdivision for the fractional part
+  if (fractional > 0.05 && fullLevels < NODE_CONFIG.fractalMaxDepth) {
+    // Sort faces by area descending — subdivide largest faces first
+    const indexed = faces.map((face, i) => ({
+      face,
+      area: triangleArea(face[0], face[1], face[2]),
+      idx: i,
+    }));
+    indexed.sort((a, b) => b.area - a.area);
+
+    const subdivCount = Math.round(fractional * faces.length);
+    const subdivided = new Set();
+    for (let i = 0; i < subdivCount && i < indexed.length; i++) {
+      subdivided.add(indexed[i].idx);
+    }
+
+    const next = [];
+    faces.forEach((face, i) => {
+      if (subdivided.has(i)) {
+        next.push(...subdivideFace(face[0], face[1], face[2], radius));
+      } else {
+        next.push(face);
+      }
+    });
+    faces = next;
+  }
+
+  // Build BufferGeometry from faces
+  const vertices = new Float32Array(faces.length * 9);
+  let vi = 0;
+  for (const [a, b, c] of faces) {
+    vertices[vi++] = a[0]; vertices[vi++] = a[1]; vertices[vi++] = a[2];
+    vertices[vi++] = b[0]; vertices[vi++] = b[1]; vertices[vi++] = b[2];
+    vertices[vi++] = c[0]; vertices[vi++] = c[1]; vertices[vi++] = c[2];
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
+  geometry.computeVertexNormals();
+
+  return geometry;
 }
 
 /**
@@ -106,18 +242,20 @@ export function createNode({ complexity = 50, tokenCount = 100, isActive = false
   group.userData.complexity = complexity;
   group.userData.isActive = isActive;
   group.userData.isHistorical = isHistorical;
-  
+
   // Calculate radius based on token count
   const normalizedTokens = Math.min(tokenCount / 500, 1);
   const radius = NODE_CONFIG.minRadius + normalizedTokens * (NODE_CONFIG.maxRadius - NODE_CONFIG.minRadius);
   group.userData.radius = radius;
-  
-  // Determine shape from complexity
+
+  // Map complexity to continuous fractal depth
+  const fractalDepth = complexityToFractalDepth(complexity);
   const shape = getShapeForComplexity(complexity);
   group.userData.shape = shape;
-  
-  // Create solid geometry and convert to wireframe
-  const solidGeometry = createShapeGeometry(shape, radius);
+  group.userData.fractalDepth = fractalDepth;
+
+  // Create fractal geometry and convert to wireframe
+  const solidGeometry = createFractalGeometry(radius, fractalDepth);
   const wireframeGeometry = new THREE.WireframeGeometry(solidGeometry);
   
   // Determine color based on state
@@ -362,5 +500,6 @@ export default {
   createNodeBirthAnimation,
   disposeNode,
   getShapeForComplexity,
+  complexityToFractalDepth,
   NODE_COLORS,
 };
