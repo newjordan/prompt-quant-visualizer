@@ -1,41 +1,31 @@
 /**
- * PromptQuantWidget - Main Widget Orchestrator
- * Coordinates renderer, navigation, and details panel
- * 
- * Follows SPEC.md §6.4 Widget Shell contract
+ * PromptQuantWidget
+ * Coordinates the starmap renderer, navigation, and details panel.
  */
 
 import { NavigationControls } from './navigation.js';
 import { DetailsPanel } from './details-panel.js';
+import { StarmapRenderer, DEFAULT_THEME } from '../viz/starmap.js';
+import { parseSession, parseSessionFromString } from '../data/parser.js';
+
+const LAYOUTS = [
+  { id: 'path', label: 'Path' },
+  { id: 'spiral', label: 'Spiral' },
+  { id: 'cluster', label: 'Cluster' }
+];
 
 export class PromptQuantWidget {
   constructor(options = {}) {
     this.options = {
-      // Renderer options (passed to StarmapRenderer when available)
       renderer: {
         layout: 'path',
         nodeSpacing: 100,
         pathCurvature: 0.3,
         maxVisibleNodes: 200,
         enableGlow: true,
-        theme: {
-          nodeColor: 0x00ffcc,
-          nodeColorActive: 0x00ffff,
-          nodeColorHover: 0x66ffee,
-          connectionColor: 0x00ffcc,
-          connectionOpacity: 0.5,
-          backgroundColor: 0x0a0a0f,
-          satelliteColors: {
-            length: 0x00aaff,
-            tools: 0xffaa00,
-            latency: 0xff5a5a,
-            drift: 0xaa44ff
-          }
-        },
+        theme: { ...DEFAULT_THEME },
         ...options.renderer
       },
-      
-      // Navigation options
       navigation: {
         position: 'bottom-center',
         showCounter: true,
@@ -43,24 +33,18 @@ export class PromptQuantWidget {
         theme: 'frost',
         ...options.navigation
       },
-      
-      // Details panel options
       details: {
         position: 'right',
-        width: 360,
+        width: 380,
         showMetrics: true,
         showFullText: true,
         theme: 'frost',
         ...options.details
       },
-      
-      // Widget-level options
       autoPlay: options.autoPlay || false,
       autoPlayInterval: options.autoPlayInterval || 3000,
       showHeader: options.showHeader !== false,
-      title: options.title || 'PROMPT.QUANT.STARMAP',
-      
-      ...options
+      title: options.title || 'Prompt Quant Starmap'
     };
 
     this.container = null;
@@ -69,13 +53,16 @@ export class PromptQuantWidget {
     this.meta = null;
     this.currentIndex = 0;
     this.autoPlayTimer = null;
-    
-    // Sub-components
     this.renderer = null;
     this.navigation = null;
     this.detailsPanel = null;
+    this.reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    this.motionMedia = window.matchMedia('(prefers-reduced-motion: reduce)');
+    this._onMotionChange = (event) => {
+      this.reducedMotion = event.matches;
+      this.renderer?.setReducedMotion?.(event.matches);
+    };
 
-    // Event handlers
     this.handlers = {
       ready: [],
       'session:loaded': [],
@@ -87,8 +74,7 @@ export class PromptQuantWidget {
   }
 
   /**
-   * Mount the widget to a container element
-   * @param {HTMLElement} container 
+   * @param {HTMLElement} container
    */
   mount(container) {
     this.container = container;
@@ -97,8 +83,8 @@ export class PromptQuantWidget {
     this._createStructure();
     this._initSubComponents();
     this._bindEvents();
+    this.motionMedia.addEventListener('change', this._onMotionChange);
     
-    // Start autoplay if enabled
     if (this.options.autoPlay && this.nodes.length > 1) {
       this._startAutoPlay();
     }
@@ -106,319 +92,312 @@ export class PromptQuantWidget {
     this._emit('ready', { widget: this });
   }
 
-  /**
-   * Create the widget DOM structure
-   */
   _createStructure() {
-    // Header (optional)
+    const announcer = document.createElement('div');
+    announcer.className = 'pqv-sr-only';
+    announcer.setAttribute('role', 'status');
+    announcer.setAttribute('aria-live', 'polite');
+    announcer.setAttribute('aria-atomic', 'true');
+    this.container.appendChild(announcer);
+    this.elements.announcer = announcer;
+
     if (this.options.showHeader) {
       const header = document.createElement('header');
       header.className = 'pqv-widget__header frost-glass';
-      header.innerHTML = `
-        <div class="pqv-widget__title">${this._escapeHtml(this.options.title)}</div>
-        <div class="pqv-widget__badges">
-          <span class="pqv-widget__badge pqv-widget__badge--nodes">
-            <span class="pqv-widget__badge-value">0</span> nodes
-          </span>
-          <span class="pqv-widget__badge pqv-widget__badge--status">Ready</span>
-        </div>
+
+      const brand = document.createElement('div');
+      brand.className = 'pqv-widget__brand';
+
+      const title = document.createElement('h1');
+      title.className = 'pqv-widget__title';
+      title.textContent = this.options.title;
+
+      const badges = document.createElement('div');
+      badges.className = 'pqv-widget__badges';
+      badges.innerHTML = `
+        <span class="pqv-widget__badge pqv-widget__badge--nodes">
+          <span class="pqv-widget__badge-value">0</span> prompts
+        </span>
+        <span class="pqv-widget__badge pqv-widget__badge--status" role="status">Ready</span>
       `;
+      brand.append(title, badges);
+
+      const layout = document.createElement('div');
+      layout.className = 'pqv-layout';
+      layout.setAttribute('role', 'radiogroup');
+      layout.setAttribute('aria-label', 'Starmap layout');
+      LAYOUTS.forEach((item) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'pqv-layout__btn';
+        button.dataset.layout = item.id;
+        button.setAttribute('role', 'radio');
+        button.setAttribute('aria-checked', String(item.id === this.options.renderer.layout));
+        button.textContent = item.label;
+        button.addEventListener('click', () => this.setLayout(item.id));
+        layout.appendChild(button);
+      });
+
+      const actions = document.createElement('div');
+      actions.className = 'pqv-widget__actions';
+
+      header.append(brand, layout, actions);
       this.container.appendChild(header);
       this.elements.header = header;
+      this.elements.actions = actions;
     }
 
-    // Main viewport (for Three.js renderer)
     const viewport = document.createElement('div');
     viewport.className = 'pqv-widget__viewport';
-    viewport.id = 'pqv-viewport';
     this.container.appendChild(viewport);
     this.elements.viewport = viewport;
 
-    // Canvas placeholder (actual canvas created by renderer)
     const canvasPlaceholder = document.createElement('div');
     canvasPlaceholder.className = 'pqv-widget__canvas-placeholder';
     canvasPlaceholder.innerHTML = `
-      <div class="pqv-widget__loading">
-        <div class="pqv-widget__loading-spinner"></div>
-        <span>Initializing starmap...</span>
+      <div class="pqv-widget__loading" role="status">
+        <div class="pqv-widget__loading-spinner" aria-hidden="true"></div>
+        <span>Initializing starmap</span>
       </div>
     `;
     viewport.appendChild(canvasPlaceholder);
     this.elements.canvasPlaceholder = canvasPlaceholder;
 
-    // UI overlay container
     const overlay = document.createElement('div');
     overlay.className = 'pqv-widget__overlay';
     this.container.appendChild(overlay);
     this.elements.overlay = overlay;
+
+    const legend = document.createElement('ul');
+    legend.className = 'pqv-legend frost-glass';
+    legend.setAttribute('aria-label', 'Satellite legend');
+    legend.innerHTML = `
+      <li><span class="pqv-legend__swatch pqv-legend__swatch--length" aria-hidden="true"></span> Length</li>
+      <li><span class="pqv-legend__swatch pqv-legend__swatch--tools" aria-hidden="true"></span> Tools</li>
+      <li><span class="pqv-legend__swatch pqv-legend__swatch--latency" aria-hidden="true"></span> Latency</li>
+      <li><span class="pqv-legend__swatch pqv-legend__swatch--drift" aria-hidden="true"></span> Drift</li>
+    `;
+    overlay.appendChild(legend);
   }
 
-  /**
-   * Initialize sub-components
-   */
   _initSubComponents() {
-    // Navigation controls
     this.navigation = new NavigationControls(this.options.navigation);
     this.navigation.mount(this.elements.overlay);
 
-    // Details panel
     this.detailsPanel = new DetailsPanel(this.options.details);
     this.detailsPanel.mount(this.elements.overlay);
 
-    // Renderer will be initialized when viz module is available
-    // For now, we'll expose a hook for the viz engineer to connect
     this._initRenderer();
   }
 
-  /**
-   * Initialize the Three.js renderer
-   * This method checks if StarmapRenderer is available and initializes it
-   */
-  async _initRenderer() {
+  _initRenderer() {
     try {
-      // Try to import the renderer dynamically
-      // The viz engineer will create this module
-      const vizModule = await import('../viz/starmap.js').catch(() => null);
-      
-      if (vizModule && vizModule.StarmapRenderer) {
-        this.renderer = new vizModule.StarmapRenderer(this.options.renderer);
-        this.renderer.mount(this.elements.viewport);
-        
-        // Connect renderer events
-        this.renderer.on('node:click', (payload) => {
-          this.goToNode(payload.index);
-          this.detailsPanel.show(payload.node);
-          this._emit('node:click', payload);
-        });
-        
-        this.renderer.on('node:hover', (payload) => {
-          this._emit('node:hover', payload);
-        });
-        
-        this.renderer.on('ready', () => {
-          this._hideLoading();
-        });
-        
-        // If nodes are already loaded, pass them to renderer
-        if (this.nodes.length > 0) {
-          this.renderer.setNodes(this.nodes);
-          this.renderer.focusNode(this.currentIndex);
-        }
-      } else {
-        // Renderer not available yet, show placeholder visualization
-        this._showPlaceholder();
+      this.renderer = new StarmapRenderer({
+        ...this.options.renderer,
+        reducedMotion: this.reducedMotion
+      });
+      this.renderer.mount(this.elements.viewport);
+
+      this.renderer.on('node:click', (payload) => {
+        this.goToNode(payload.index);
+        this.detailsPanel.show(payload.node);
+        this._emit('node:click', payload);
+      });
+
+      this.renderer.on('node:hover', (payload) => {
+        this._emit('node:hover', payload);
+      });
+
+      this.renderer.on('ready', () => {
+        this._hideLoading();
+      });
+
+      if (this.nodes.length > 0) {
+        this.renderer.setNodes(this.nodes);
+        this.renderer.focusNode(this.currentIndex, false);
       }
     } catch (err) {
-      console.warn('StarmapRenderer not available:', err);
+      console.error('Failed to initialize renderer:', err);
+      this.renderer = null;
+      this._emit('error', { error: err, context: 'initRenderer' });
       this._showPlaceholder();
     }
   }
 
-  /**
-   * Show placeholder when renderer is not available
-   */
   _showPlaceholder() {
     if (!this.elements.canvasPlaceholder) return;
-
+    this.elements.canvasPlaceholder.style.display = '';
     this.elements.canvasPlaceholder.innerHTML = `
       <div class="pqv-widget__placeholder">
         <div class="pqv-placeholder__nodes"></div>
-        <p class="pqv-placeholder__text">
-          Load a session to visualize the starmap
-        </p>
+        <p class="pqv-placeholder__text">Load a session to visualize the starmap</p>
       </div>
     `;
   }
 
-  /**
-   * Hide loading indicator
-   */
   _hideLoading() {
     if (this.elements.canvasPlaceholder) {
       this.elements.canvasPlaceholder.style.display = 'none';
     }
   }
 
-  /**
-   * Bind event handlers between components
-   */
   _bindEvents() {
-    // Navigation events
     this.navigation.on('prev', () => this.goPrev());
     this.navigation.on('next', () => this.goNext());
     this.navigation.on('jump', (index) => this.goToNode(index));
 
-    // Details panel navigation
     this.detailsPanel.on('navigate', (direction) => {
       if (direction === 'prev') this.goPrev();
       else if (direction === 'next') this.goNext();
     });
+  }
 
-    this.detailsPanel.on('close', () => {
-      // Optionally deselect node when panel closes
+  /**
+   * Element where the host page can place extra toolbar actions.
+   * @returns {HTMLElement|null}
+   */
+  getActionsElement() {
+    return this.elements.actions || null;
+  }
+
+  /**
+   * @param {'path'|'spiral'|'cluster'} layout
+   */
+  setLayout(layout) {
+    if (!LAYOUTS.some((item) => item.id === layout)) return;
+    if (layout === this.options.renderer.layout) return;
+
+    this.options.renderer.layout = layout;
+    const changed = this.renderer?.setLayout?.(layout) !== false;
+    this._syncLayoutButtons();
+    if (changed) {
+      const label = LAYOUTS.find((item) => item.id === layout)?.label || layout;
+      this._announce(`${label} layout`);
+    }
+  }
+
+  _syncLayoutButtons() {
+    if (!this.elements.header) return;
+    this.elements.header.querySelectorAll('.pqv-layout__btn').forEach((button) => {
+      button.setAttribute('aria-checked', String(button.dataset.layout === this.options.renderer.layout));
     });
   }
 
   /**
-   * Load session from JSONL file path
-   * @param {string} jsonlPath - Path to session file
-   * @returns {Promise<void>}
+   * @param {string} status
+   */
+  setStatus(status) {
+    this._updateStatus(status);
+  }
+
+  /**
+   * Load a session from a URL or path the browser can fetch.
+   * @param {string} jsonlPath
    */
   async loadSession(jsonlPath) {
     try {
-      this._updateStatus('Loading...');
-
-      // Try to import the parser dynamically
-      const dataModule = await import('../data/parser.js').catch(() => null);
-      
-      if (dataModule && dataModule.parseSession) {
-        const result = await dataModule.parseSession(jsonlPath);
-        
-        if (result.success) {
-          this.loadNodes(result.nodes);
-          this.meta = result.meta;
-          this._emit('session:loaded', { nodes: result.nodes, meta: result.meta });
-          this._updateStatus('Loaded');
-        } else {
-          throw new Error(result.errors.map(e => e.message).join(', '));
-        }
-      } else {
-        // Parser not available, try fetching and parsing manually
-        await this._loadSessionManual(jsonlPath);
+      this._updateStatus('Loading');
+      const result = await parseSession(jsonlPath);
+      if (!result.success) {
+        throw new Error('No user prompts found. Use an OpenClaw session or lines with role and content.');
       }
+      this.loadNodes(result.nodes, result.meta);
+      this._updateStatus('Loaded');
+      this._emit('session:loaded', { nodes: result.nodes, meta: result.meta });
+      return result;
     } catch (err) {
       console.error('Failed to load session:', err);
       this._updateStatus('Error');
       this._emit('error', { error: err, context: 'loadSession' });
+      return { success: false, nodes: [], meta: null, errors: [{ line: 0, message: err.message }] };
     }
   }
 
   /**
-   * Manual session loading fallback
-   * @param {string} jsonlPath 
+   * Parse transcript text already in memory.
+   * Supports OpenClaw session JSONL and simple `{ role, content }` lines.
+   * @param {string} text
+   * @param {string} [sessionId]
    */
-  async _loadSessionManual(jsonlPath) {
-    const response = await fetch(jsonlPath);
-    const text = await response.text();
-    const lines = text.trim().split('\n').filter(Boolean);
-    
-    const nodes = [];
-    let index = 0;
-
-    for (const line of lines) {
-      try {
-        const entry = JSON.parse(line);
-        if (entry.role === 'user') {
-          nodes.push({
-            id: `node-${index}`,
-            index: index,
-            text: entry.content || '',
-            textPreview: (entry.content || '').substring(0, 120) + (entry.content?.length > 120 ? '…' : ''),
-            timestamp: entry.timestamp ? new Date(entry.timestamp).getTime() : Date.now() - (lines.length - index) * 60000,
-            metrics: {
-              charCount: (entry.content || '').length,
-              wordCount: (entry.content || '').split(/\s+/).filter(Boolean).length,
-              tokenEstimate: Math.ceil((entry.content || '').length / 4),
-              toolCallCount: 0,
-              toolTypes: [],
-              responseLatencyMs: 0,
-              similarityToPrev: null,
-              topicDriftScore: null,
-              complexityScore: Math.min(100, Math.ceil((entry.content || '').length / 20))
-            },
-            position: { x: 0, y: 0, z: 0 },
-            prevId: index > 0 ? `node-${index - 1}` : null,
-            nextId: null
-          });
-          index++;
-        }
-      } catch (e) {
-        console.warn('Failed to parse line:', line, e);
+  loadSessionText(text, sessionId = 'upload') {
+    try {
+      const result = parseSessionFromString(text, sessionId);
+      if (!result.success) {
+        const error = new Error('No user prompts found. Use an OpenClaw session or lines with role and content.');
+        this._updateStatus('Error');
+        this._emit('error', { error, context: 'loadSessionText', errors: result.errors });
+        return result;
       }
+      this.loadNodes(result.nodes, result.meta);
+      this._updateStatus('Loaded');
+      this._emit('session:loaded', { nodes: result.nodes, meta: result.meta });
+      return result;
+    } catch (err) {
+      this._updateStatus('Error');
+      this._emit('error', { error: err, context: 'loadSessionText' });
+      return { success: false, nodes: [], meta: null, errors: [{ line: 0, message: err.message }] };
     }
-
-    // Set next IDs
-    for (let i = 0; i < nodes.length - 1; i++) {
-      nodes[i].nextId = nodes[i + 1].id;
-    }
-
-    this.loadNodes(nodes);
-    this._emit('session:loaded', { nodes, meta: null });
   }
 
   /**
-   * Load nodes directly
-   * @param {PromptNode[]} nodes 
+   * @param {Array} nodes
+   * @param {object|null} [meta]
    */
-  loadNodes(nodes) {
+  loadNodes(nodes, meta = null) {
     this.nodes = nodes;
+    this.meta = meta;
     this.currentIndex = 0;
 
-    // Update navigation
     this.navigation.setNodes(nodes);
     this.navigation.setState(0, nodes.length);
-
-    // Update header badges
     this._updateBadges();
 
-    // Update renderer
     if (this.renderer) {
       this.renderer.setNodes(nodes);
-      this.renderer.focusNode(0);
+      this.renderer.focusNode(0, false);
     } else {
-      // Update placeholder with node previews
       this._renderPlaceholderNodes();
     }
 
-    // Show first node details
-    if (nodes.length > 0) {
-      // Don't auto-show details panel on load
-      // this.detailsPanel.show(nodes[0]);
-      this._hideLoading();
-    }
+    if (nodes.length > 0) this._hideLoading();
 
-    this._emit('node:change', { node: nodes[0], index: 0 });
+    const label = meta?.sessionId === 'demo'
+      ? `Demo session loaded, ${nodes.length} prompts.`
+      : `Loaded ${nodes.length} prompts.`;
+    this._announce(nodes[0]
+      ? `${label} Prompt 1. ${this._preview(nodes[0])}`
+      : label);
+    this._emit('node:change', { node: nodes[0] || null, index: 0 });
   }
 
-  /**
-   * Render placeholder node visualization
-   */
   _renderPlaceholderNodes() {
     const container = this.elements.canvasPlaceholder?.querySelector('.pqv-placeholder__nodes');
     if (!container || this.nodes.length === 0) return;
 
-    // Create simple CSS node representation
-    container.innerHTML = this.nodes.slice(0, 20).map((node, i) => {
+    container.replaceChildren(...this.nodes.slice(0, 20).map((node, i) => {
       const size = 20 + (node.metrics?.complexityScore || 0) / 5;
-      const active = i === this.currentIndex;
-      return `
-        <div class="pqv-placeholder__node ${active ? 'pqv-placeholder__node--active' : ''}"
-             style="width: ${size}px; height: ${size}px;"
-             data-index="${i}"
-             title="Prompt #${i + 1}">
-        </div>
-      `;
-    }).join('');
-
-    // Add click handlers
-    container.querySelectorAll('.pqv-placeholder__node').forEach(el => {
-      el.addEventListener('click', () => {
-        const idx = parseInt(el.dataset.index);
-        this.goToNode(idx);
-        this.detailsPanel.show(this.nodes[idx]);
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = `pqv-placeholder__node${i === this.currentIndex ? ' pqv-placeholder__node--active' : ''}`;
+      button.style.width = `${size}px`;
+      button.style.height = `${size}px`;
+      button.dataset.index = String(i);
+      button.setAttribute('aria-label', `Prompt ${i + 1}: ${this._preview(node)}`);
+      button.addEventListener('click', () => {
+        this.goToNode(i);
+        this.detailsPanel.show(this.nodes[i]);
       });
-    });
+      return button;
+    }));
 
-    // Update placeholder text
     const textEl = this.elements.canvasPlaceholder?.querySelector('.pqv-placeholder__text');
     if (textEl) {
-      textEl.textContent = `${this.nodes.length} prompts loaded • Click a node to view details`;
+      textEl.textContent = `${this.nodes.length} prompts loaded. Choose a prompt to view details.`;
     }
   }
 
   /**
-   * Navigate to a specific node
-   * @param {number} index 
+   * @param {number} index
    */
   goToNode(index) {
     if (index < 0 || index >= this.nodes.length) return;
@@ -427,57 +406,32 @@ export class PromptQuantWidget {
     this.currentIndex = index;
     const node = this.nodes[index];
 
-    // Update navigation
     this.navigation.setState(index, this.nodes.length);
 
-    // Update renderer
-    if (this.renderer) {
-      this.renderer.focusNode(index);
-    }
-
-    // Update details if visible
-    if (this.detailsPanel.isVisible()) {
-      this.detailsPanel.show(node);
-    }
-
-    // Update placeholder
+    if (this.renderer) this.renderer.focusNode(index);
+    if (this.detailsPanel.isVisible()) this.detailsPanel.show(node);
     this._updatePlaceholderActive();
 
+    this._announce(`Prompt ${index + 1} of ${this.nodes.length}. ${this._preview(node)}`);
     this._emit('node:change', { node, index });
   }
 
-  /**
-   * Navigate to next node
-   */
   goNext() {
     if (this.currentIndex < this.nodes.length - 1) {
       this.goToNode(this.currentIndex + 1);
     } else if (this.options.autoPlay) {
-      // Loop back to start in autoplay mode
       this.goToNode(0);
     }
   }
 
-  /**
-   * Navigate to previous node
-   */
   goPrev() {
-    if (this.currentIndex > 0) {
-      this.goToNode(this.currentIndex - 1);
-    }
+    if (this.currentIndex > 0) this.goToNode(this.currentIndex - 1);
   }
 
-  /**
-   * Get current node
-   * @returns {PromptNode|null}
-   */
   getCurrentNode() {
     return this.nodes[this.currentIndex] || null;
   }
 
-  /**
-   * Start autoplay mode
-   */
   _startAutoPlay() {
     this._stopAutoPlay();
     this.autoPlayTimer = setInterval(() => {
@@ -485,9 +439,6 @@ export class PromptQuantWidget {
     }, this.options.autoPlayInterval);
   }
 
-  /**
-   * Stop autoplay mode
-   */
   _stopAutoPlay() {
     if (this.autoPlayTimer) {
       clearInterval(this.autoPlayTimer);
@@ -495,60 +446,54 @@ export class PromptQuantWidget {
     }
   }
 
-  /**
-   * Update header badges
-   */
   _updateBadges() {
     if (!this.elements.header) return;
-
     const nodesValue = this.elements.header.querySelector('.pqv-widget__badge--nodes .pqv-widget__badge-value');
-    if (nodesValue) {
-      nodesValue.textContent = this.nodes.length;
-    }
+    if (nodesValue) nodesValue.textContent = String(this.nodes.length);
   }
 
   /**
-   * Update status badge
-   * @param {string} status 
+   * @param {string} status
    */
   _updateStatus(status) {
     if (!this.elements.header) return;
-
     const statusEl = this.elements.header.querySelector('.pqv-widget__badge--status');
-    if (statusEl) {
-      statusEl.textContent = status;
-      statusEl.classList.toggle('pqv-widget__badge--ok', status === 'Loaded' || status === 'Ready');
-      statusEl.classList.toggle('pqv-widget__badge--error', status === 'Error');
-    }
+    if (!statusEl) return;
+    statusEl.textContent = status;
+    statusEl.classList.toggle('pqv-widget__badge--ok', status === 'Loaded' || status === 'Ready' || status === 'Demo');
+    statusEl.classList.toggle('pqv-widget__badge--error', status === 'Error');
   }
 
-  /**
-   * Update placeholder active node styling
-   */
   _updatePlaceholderActive() {
     const nodes = this.elements.canvasPlaceholder?.querySelectorAll('.pqv-placeholder__node');
     if (!nodes) return;
-
     nodes.forEach((el, i) => {
       el.classList.toggle('pqv-placeholder__node--active', i === this.currentIndex);
     });
   }
 
   /**
-   * Escape HTML for safe display
-   * @param {string} str 
-   * @returns {string}
+   * @param {object} node
    */
-  _escapeHtml(str) {
-    const div = document.createElement('div');
-    div.textContent = str;
-    return div.innerHTML;
+  _preview(node) {
+    return (node.textPreview || node.text || '').replace(/\s+/g, ' ').trim();
   }
 
   /**
-   * Emit event to handlers
-   * @param {string} event 
-   * @param {*} payload 
+   * @param {string} message
+   */
+  _announce(message) {
+    const el = this.elements.announcer;
+    if (!el) return;
+    el.textContent = '';
+    requestAnimationFrame(() => {
+      el.textContent = message;
+    });
+  }
+
+  /**
+   * @param {string} event
+   * @param {*} payload
    */
   _emit(event, payload) {
     if (this.handlers[event]) {
@@ -556,68 +501,40 @@ export class PromptQuantWidget {
     }
   }
 
-  /**
-   * Register event handler
-   * @param {string} event 
-   * @param {Function} handler 
-   */
   on(event, handler) {
-    if (this.handlers[event]) {
-      this.handlers[event].push(handler);
-    }
+    if (this.handlers[event]) this.handlers[event].push(handler);
   }
 
-  /**
-   * Remove event handler
-   * @param {string} event 
-   * @param {Function} handler 
-   */
   off(event, handler) {
     if (this.handlers[event]) {
       this.handlers[event] = this.handlers[event].filter(h => h !== handler);
     }
   }
 
-  /**
-   * Get the renderer instance (for external integration)
-   * @returns {StarmapRenderer|null}
-   */
   getRenderer() {
     return this.renderer;
   }
 
-  /**
-   * Get session metadata
-   * @returns {SessionMeta|null}
-   */
   getMeta() {
     return this.meta;
   }
 
-  /**
-   * Get all nodes
-   * @returns {PromptNode[]}
-   */
   getNodes() {
     return this.nodes;
   }
 
-  /**
-   * Clean up and remove from DOM
-   */
   dispose() {
     this._stopAutoPlay();
+    this.motionMedia.removeEventListener('change', this._onMotionChange);
 
     if (this.renderer) {
       this.renderer.dispose();
       this.renderer = null;
     }
-
     if (this.navigation) {
       this.navigation.dispose();
       this.navigation = null;
     }
-
     if (this.detailsPanel) {
       this.detailsPanel.dispose();
       this.detailsPanel = null;

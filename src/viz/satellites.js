@@ -127,6 +127,15 @@ function createSatelliteMaterial(color) {
  * @param {number} value - Metric value
  * @returns {number} Satellite size
  */
+function stablePhase(key) {
+  let hash = 2166136261;
+  for (let i = 0; i < key.length; i++) {
+    hash ^= key.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return ((hash >>> 0) / 4294967295) * Math.PI * 2;
+}
+
 function calculateSatelliteSize(config, value) {
   if (value === null || value === undefined) {
     return config.scaleMin;
@@ -188,8 +197,7 @@ export function createSatellites(metrics) {
     
     const satellite = createSatellite(config, value);
     
-    // Random initial phase for orbit
-    const phase = Math.random() * Math.PI * 2;
+    const phase = stablePhase(config.metric);
     group.userData.orbitPhases.set(satellite.uuid, phase);
     
     // Position on orbit
@@ -257,7 +265,7 @@ function createToolTypeSatellites(group, toolTypes) {
     const z = orbitRadius * Math.sin(phase) * Math.cos(tilt);
     satellite.position.set(x, y, z);
     
-    group.userData.orbitPhases.set(satellite.uuid, phase);
+    group.userData.orbitPhases.set(satellite.uuid, 0);
     group.add(satellite);
   });
 }
