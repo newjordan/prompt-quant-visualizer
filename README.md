@@ -29,6 +29,14 @@ The goal is to make operator workflows easier to inspect. A session should show 
 
 ## Demo / Visual Demonstration
 
+The hosted demo is published from `main` by GitHub Actions:
+
+[Open the starmap demo](https://newjordan.github.io/prompt-quant-visualizer/)
+
+Enable it once in the repository under **Settings → Pages → Build and deployment → GitHub Actions**. The workflow is `.github/workflows/pages.yml`. It installs dependencies, runs the parser tests, and uploads the static `dist` build. Asset paths are relative, so the same build works on GitHub project pages and a local preview.
+
+![Prompt Quant Visualizer showing a session as a glowing 3D path, with navigation and the details panel open](docs/demo-screenshot.png)
+
 ![Prompt Quant Visualizer system overview](docs/prompt-quant-system.svg)
 
 The current interaction model is:
@@ -55,19 +63,29 @@ flowchart LR
 
 ### Requirements
 
-- Node.js 18+
+- Node.js 20.19+ or 22.12+
 - npm
 
 ### Run Locally
 
 ```bash
 npm install
+npm test
 npm run dev
 ```
 
 Open `http://localhost:5173`.
 
-You can load your own transcript with **Load Session** or work from the built-in demo prompts.
+The page loads a built-in demo transcript. Use **Load session** for your own `.jsonl` file, either an OpenClaw session or simpler `{ "role", "content" }` lines. `npm run build` writes a static site to `dist/`, and `npm run preview` serves that build.
+
+### Keyboard
+
+- `Left` / `Right` move between prompts
+- `Home` / `End` jump to the first or last prompt
+- `1` through `9` jump to that prompt
+- `Esc` closes the details panel
+- `?` opens the control list
+- `Ctrl` or `Cmd` + `O` opens a session file
 
 ## Future Experiments
 

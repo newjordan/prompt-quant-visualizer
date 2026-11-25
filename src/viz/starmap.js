@@ -10,17 +10,18 @@
  */
 
 import * as THREE from 'three';
-import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
-import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
-import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 
 import { createNode, updateNodeState, animateNodeBreath, createNodeBirthAnimation, disposeNode, NODE_COLORS } from './nodes.js';
 import { createSatellites, animateSatellites, disposeSatellites } from './satellites.js';
 import { createPath, animatePathPulse, updatePathState, createPathDrawAnimation, disposePath, PATH_COLORS } from './paths.js';
 
 // === Default Theme (merged from both art direction guides) ===
-const DEFAULT_THEME = {
+export const DEFAULT_THEME = {
   // Node colors
   nodeColor: 0x00FFCC,
   nodeColorActive: 0x7DF4FF,
@@ -50,6 +51,7 @@ const DEFAULT_OPTIONS = {
   theme: DEFAULT_THEME,
   maxVisibleNodes: 200,
   enableGlow: true,
+  reducedMotion: false,
   
   // Camera
   cameraFov: 50,
@@ -58,9 +60,9 @@ const DEFAULT_OPTIONS = {
   cameraPosition: { x: 0, y: 150, z: 600 },
   
   // Bloom (from art direction)
-  bloomStrength: 1.8,
-  bloomRadius: 0.4,
-  bloomThreshold: 0.6,
+  bloomStrength: 0.85,
+  bloomRadius: 0.55,
+  bloomThreshold: 0.12,
 };
 
 // === Layout Algorithms ===
@@ -199,8 +201,14 @@ export class StarmapRenderer {
     });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.setSize(container.clientWidth, container.clientHeight);
+    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ReinhardToneMapping;
-    this.renderer.toneMappingExposure = 1.5;
+    this.renderer.toneMappingExposure = 1.05;
+    this.renderer.domElement.setAttribute('role', 'img');
+    this.renderer.domElement.setAttribute(
+      'aria-label',
+      '3D starmap of the loaded session. Use the prompt navigation controls to move between prompts.'
+    );
     container.appendChild(this.renderer.domElement);
     
     // Create orbit controls
@@ -296,7 +304,8 @@ export class StarmapRenderer {
     if (this.starsGroup) {
       this.starsGroup.traverse((child) => {
         if (child.geometry) child.geometry.dispose();
-        if (child.material) child.material.dispose();
+        const materials = Array.isArray(child.material) ? child.material : [child.material];
+        materials.forEach((material) => material?.dispose?.());
       });
     }
     
@@ -321,8 +330,20 @@ export class StarmapRenderer {
     // Clear event handlers
     this.eventHandlers.clear();
     
-    // Remove resize listener
+    if (this.resizeObserver) {
+      this.resizeObserver.disconnect();
+      this.resizeObserver = null;
+    }
     window.removeEventListener('resize', this.handleResize);
+
+    if (this.renderer?.domElement) {
+      if (this._onPointerMove) {
+        this.renderer.domElement.removeEventListener('pointermove', this._onPointerMove);
+      }
+      if (this._onClick) {
+        this.renderer.domElement.removeEventListener('click', this._onClick);
+      }
+    }
   }
   
   // === Setup Methods ===
@@ -340,6 +361,7 @@ export class StarmapRenderer {
       this.options.bloomThreshold
     );
     this.composer.addPass(bloomPass);
+    this.composer.addPass(new OutputPass());
     
     this.bloomPass = bloomPass;
   }
@@ -359,14 +381,20 @@ export class StarmapRenderer {
   }
   
   setupEventListeners() {
-    // Resize handler
     this.handleResize = this.handleResize.bind(this);
-    window.addEventListener('resize', this.handleResize);
+    this._onPointerMove = this.handlePointerMove.bind(this);
+    this._onClick = this.handleClick.bind(this);
+
+    if (typeof ResizeObserver !== 'undefined' && this.container) {
+      this.resizeObserver = new ResizeObserver(() => this.handleResize());
+      this.resizeObserver.observe(this.container);
+    } else {
+      window.addEventListener('resize', this.handleResize);
+    }
     
-    // Mouse/pointer events
     if (this.renderer) {
-      this.renderer.domElement.addEventListener('pointermove', this.handlePointerMove.bind(this));
-      this.renderer.domElement.addEventListener('click', this.handleClick.bind(this));
+      this.renderer.domElement.addEventListener('pointermove', this._onPointerMove);
+      this.renderer.domElement.addEventListener('click', this._onClick);
     }
   }
   
@@ -409,8 +437,11 @@ export class StarmapRenderer {
     
     // Add subtle grid plane (optional)
     const gridHelper = new THREE.GridHelper(2000, 50, 0x1a1a2e, 0x0a0a1a);
-    gridHelper.material.transparent = true;
-    gridHelper.material.opacity = 0.15;
+    const gridMaterials = Array.isArray(gridHelper.material) ? gridHelper.material : [gridHelper.material];
+    gridMaterials.forEach((material) => {
+      material.transparent = true;
+      material.opacity = 0.15;
+    });
     gridHelper.position.y = -200;
     this.starsGroup.add(gridHelper);
   }
@@ -422,6 +453,7 @@ export class StarmapRenderer {
     
     const width = this.container.clientWidth;
     const height = this.container.clientHeight;
+    if (!width || !height) return;
     
     this.camera.aspect = width / height;
     this.camera.updateProjectionMatrix();
@@ -455,6 +487,10 @@ export class StarmapRenderer {
       if (obj.userData.type === 'promptNode') {
         newHoveredIndex = obj.userData.nodeIndex;
       }
+    }
+
+    if (this.renderer?.domElement) {
+      this.renderer.domElement.style.cursor = newHoveredIndex === null ? '' : 'pointer';
     }
     
     if (newHoveredIndex !== this.hoveredIndex) {
@@ -584,11 +620,11 @@ export class StarmapRenderer {
       node.position.z
     );
     
-    // Calculate camera target position (offset to view node)
-    const cameraOffset = new THREE.Vector3(80, 60, 200);
+    // Pull back enough to show the path leading into the focused node.
+    const cameraOffset = new THREE.Vector3(150, 120, 380);
     const cameraTarget = targetPosition.clone().add(cameraOffset);
     
-    if (animate && this.controls) {
+    if (animate && this.controls && !this.options.reducedMotion) {
       // Smooth camera transition
       this.cameraTransition = {
         startPosition: this.camera.position.clone(),
@@ -612,6 +648,38 @@ export class StarmapRenderer {
       node,
       index,
       previousIndex: prevIndex
+    });
+  }
+
+  /**
+   * Rebuild the scene with a different layout algorithm.
+   * @param {'path'|'cluster'|'spiral'} layout
+   * @returns {boolean} Whether the layout changed
+   */
+  setLayout(layout) {
+    if (!LAYOUT_ALGORITHMS[layout] || layout === this.options.layout) return false;
+    this.options.layout = layout;
+    if (this.nodes.length === 0) return true;
+
+    const index = this.currentIndex;
+    this.setNodes(this.nodes);
+    this.focusNode(index, true);
+    return true;
+  }
+
+  /**
+   * Enable or disable continuous motion.
+   * @param {boolean} enabled
+   */
+  setReducedMotion(enabled) {
+    this.options.reducedMotion = Boolean(enabled);
+    if (!this.options.reducedMotion) return;
+
+    this.cameraTransition = null;
+    this.animations.forEach((anim) => anim.update?.(performance.now() + 100000));
+    this.animations = [];
+    this.nodeObjects.forEach(({ group }) => {
+      group.scale.setScalar(1);
     });
   }
   
@@ -796,7 +864,7 @@ export class StarmapRenderer {
     });
     
     // Create birth animation for new nodes
-    if (this.nodes.length > 1 && index === this.nodes.length - 1) {
+    if (!this.options.reducedMotion && this.nodes.length > 1 && index === this.nodes.length - 1) {
       const animation = createNodeBirthAnimation(nodeGroup);
       this.animations.push(animation);
     }
@@ -830,7 +898,9 @@ export class StarmapRenderer {
     });
     
     this.pathsGroup.add(pathGroup);
-    this.pathObjects.set(`${fromNode.id}-${toNode.id}`, pathGroup);
+    pathGroup.userData.fromId = fromNode.id;
+    pathGroup.userData.toId = toNode.id;
+    this.pathObjects.set(`${fromIndex}->${toIndex}`, pathGroup);
     
     // Animate path drawing for new paths
     if (toIndex === this.nodes.length - 1 && this.nodes.length > 1) {
@@ -860,10 +930,9 @@ export class StarmapRenderer {
     });
     
     // Update all paths
-    this.pathObjects.forEach((pathGroup, key) => {
-      const [fromId, toId] = key.split('-');
-      const fromIndex = this.nodes.findIndex(n => n.id === fromId);
-      const toIndex = this.nodes.findIndex(n => n.id === toId);
+    this.pathObjects.forEach((pathGroup) => {
+      const fromIndex = this.nodes.findIndex(n => n.id === pathGroup.userData.fromId);
+      const toIndex = this.nodes.findIndex(n => n.id === pathGroup.userData.toId);
       
       const isActive = toIndex === this.currentIndex || fromIndex === this.currentIndex;
       const age = Math.abs(this.currentIndex - Math.max(fromIndex, toIndex));
@@ -912,29 +981,25 @@ export class StarmapRenderer {
         this.controls.update();
       }
       
-      // Update animations
-      this.animations = this.animations.filter((anim) => {
-        anim.update(time);
-        return !anim.isComplete;
-      });
-      
-      // Animate nodes
-      this.nodeObjects.forEach(({ group, satellites }) => {
-        // Breath animation for active node
-        if (group.userData.isActive) {
-          animateNodeBreath(group, time);
-        }
-        
-        // Satellite orbits
-        if (satellites) {
-          animateSatellites(satellites, deltaTime, time);
-        }
-      });
-      
-      // Animate path pulses
-      this.pathObjects.forEach((pathGroup) => {
-        animatePathPulse(pathGroup, time);
-      });
+      if (!this.options.reducedMotion) {
+        this.animations = this.animations.filter((anim) => {
+          anim.update(time);
+          return !anim.isComplete;
+        });
+
+        this.nodeObjects.forEach(({ group, satellites }) => {
+          if (group.userData.isActive) {
+            animateNodeBreath(group, time);
+          }
+          if (satellites) {
+            animateSatellites(satellites, deltaTime, time);
+          }
+        });
+
+        this.pathObjects.forEach((pathGroup) => {
+          animatePathPulse(pathGroup, time);
+        });
+      }
       
       // Render
       if (this.composer) {

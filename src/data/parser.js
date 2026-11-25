@@ -108,6 +108,59 @@ function createPreview(text, maxLen = 120) {
 }
 
 /**
+ * Convert a timestamp value to epoch milliseconds.
+ * Missing or invalid values become 0 so metrics stay numeric.
+ * @param {string|number|undefined} value
+ * @returns {number}
+ */
+function toTimestamp(value) {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (value == null || value === '') return 0;
+  const parsed = new Date(value).getTime();
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+/**
+ * Accept OpenClaw session entries and simpler `{ role, content }` lines.
+ * @param {object} entry
+ * @param {number} lineNum
+ * @returns {object}
+ */
+function coerceEntry(entry, lineNum) {
+  if (!entry || typeof entry !== 'object') return entry;
+
+  if (entry.type === 'message' && entry.message && typeof entry.message.content === 'string') {
+    return {
+      ...entry,
+      id: entry.id || `line-${lineNum}`,
+      message: {
+        ...entry.message,
+        content: [{ type: 'text', text: entry.message.content }],
+      },
+    };
+  }
+
+  if (entry.type) return entry;
+
+  if (!entry.role) return entry;
+
+  const raw = entry.content ?? entry.text ?? '';
+  const content = Array.isArray(raw)
+    ? raw.map((block) => (typeof block === 'string' ? { type: 'text', text: block } : block))
+    : [{ type: 'text', text: String(raw) }];
+
+  return {
+    type: 'message',
+    id: entry.id || `line-${lineNum}`,
+    timestamp: entry.timestamp ?? 0,
+    message: {
+      role: entry.role,
+      content,
+    },
+  };
+}
+
+/**
  * Extract text content from message content blocks
  * @param {ContentBlock[]} content - Content blocks array
  * @returns {string} Extracted text
@@ -162,7 +215,7 @@ function parseLine(line, lineNum) {
   if (!trimmed) return { entry: null, error: null };
   
   try {
-    const entry = JSON.parse(trimmed);
+    const entry = coerceEntry(JSON.parse(trimmed), lineNum);
     return { entry, error: null };
   } catch (err) {
     return {
@@ -184,7 +237,7 @@ function parseLine(line, lineNum) {
  */
 function findAssistantResponse(entries, userIndex) {
   const userEntry = entries[userIndex];
-  const userTimestamp = new Date(userEntry.timestamp).getTime();
+  const userTimestamp = toTimestamp(userEntry.timestamp);
   
   let latencyMs = 0;
   const toolCalls = [];
@@ -201,10 +254,10 @@ function findAssistantResponse(entries, userIndex) {
     }
     
     if (entry.type === 'message' && entry.message?.role === 'assistant') {
-      const responseTimestamp = new Date(entry.timestamp).getTime();
+      const responseTimestamp = toTimestamp(entry.timestamp);
       
       // Calculate latency from user message to first assistant response
-      if (latencyMs === 0) {
+      if (latencyMs === 0 && userTimestamp > 0 && responseTimestamp > 0) {
         latencyMs = responseTimestamp - userTimestamp;
       }
       
@@ -290,8 +343,7 @@ export async function parseSession(jsonlPath) {
     const text = extractTextContent(message.content);
     if (!text) continue; // Skip empty messages
     
-    // Get timestamp
-    const timestamp = new Date(entry.timestamp).getTime();
+    const timestamp = toTimestamp(entry.timestamp);
     
     // Find associated assistant response
     const { latencyMs, toolCalls, thinkingBlocks } = findAssistantResponse(entries, entryIndex);
@@ -445,7 +497,7 @@ export function parseSessionFromString(jsonlContent, sessionId = 'inline') {
     const text = extractTextContent(message.content);
     if (!text) continue;
     
-    const timestamp = new Date(entry.timestamp).getTime();
+    const timestamp = toTimestamp(entry.timestamp);
     const { latencyMs, toolCalls, thinkingBlocks } = findAssistantResponse(entries, entryIndex);
     
     const topicSignature = createTopicSignature(text);
